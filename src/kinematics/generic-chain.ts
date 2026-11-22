@@ -1,5 +1,4 @@
 import {
-  vec3,
   vec3Distance,
   type IKResult,
   type JointConfig,
@@ -9,6 +8,9 @@ import {
 
 /** Central-difference step for the numerical Jacobian, in radians. */
 const JACOBIAN_STEP_RAD = 1e-6;
+
+/** Full turn of a revolute joint, in radians. */
+const TWO_PI = 2 * Math.PI;
 
 /**
  * Solver implementations the registry can build for a generic chain.
@@ -335,7 +337,6 @@ function wrapIntoLimits(
   joints: readonly ChainJointConfig[],
   angles: readonly number[],
 ): readonly number[] | undefined {
-  const TWO_PI = 2 * Math.PI;
   const wrapped: (number | undefined)[] = angles.map((value, i) => {
     const joint = joints[i] as ChainJointConfig;
     if (!Number.isFinite(value)) return undefined;
@@ -461,6 +462,16 @@ function validateConfig(config: GenericChainRobotConfig): string[] {
     if (axisLength === 0 || !Number.isFinite(axisLength)) {
       problems.push(`joints[${i}] (${joint.name}) axis must be non-zero to be normalized`);
     }
+  }
+  const { toleranceMm, maxIterations, damping } = config.ik;
+  if (!Number.isFinite(toleranceMm) || toleranceMm <= 0) {
+    problems.push(`ik.toleranceMm must be finite and positive, got ${toleranceMm}`);
+  }
+  if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+    problems.push(`ik.maxIterations must be an integer of at least 1, got ${maxIterations}`);
+  }
+  if (!Number.isFinite(damping) || damping <= 0) {
+    problems.push(`ik.damping must be finite and positive, got ${damping}`);
   }
   return problems;
 }

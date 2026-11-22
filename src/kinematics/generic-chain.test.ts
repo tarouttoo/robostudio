@@ -199,3 +199,188 @@ describe("generic-chain numeric inverse kinematics", () => {
     }
   });
 });
+
+describe("generic-chain IK named failure statuses", () => {
+  const model = resolveModel(mikoShapedChainConfig());
+
+  it("reports unreachable for a point beyond the outer reach", () => {
+    expect(model.inverseKinematics([500, 0, 60])).toEqual({ status: "unreachable" });
+  });
+
+  it("reports unreachable for a point below the folded reach", () => {
+    expect(model.inverseKinematics([0, 0, -200])).toEqual({ status: "unreachable" });
+  });
+
+  it("reports angle-limit naming a genuinely violated joint for a target needing q2 past its max", () => {
+    // Straight above the base: several out-of-limits solutions exist
+    // (e.g. the analytic shoulder-up q2 ≈ 129° > +105°, or a mirrored
+    // pose violating q3); which branch the numeric descent finds depends
+    // on its deterministic seeds, so assert status plus a genuine named
+    // violation rather than a specific joint.
+    const result = model.inverseKinematics([0, 0, 200]);
+    if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
+    const limit = model.joints.find((joint) => joint.name === result.joint);
+    if (!limit) throw new Error(`angle-limit names unknown joint ${result.joint}`);
+    expect(result.bound === "max" ? result.valueRad > limit.maxRad : result.valueRad < limit.minRad).toBe(true);
+  });
+
+  it("reports angle-limit naming the joint for a target needing q2 below its min", () => {
+    // The shoulder-up pose needs q2 ≈ −21.6° < −15°.
+    const result = model.inverseKinematics([60, 0, -60]);
+    if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
+    expect(result.joint).toBe("q2");
+    expect(result.bound).toBe("min");
+    expect(result.valueRad).toBeLessThan(model.joints[1]?.minRad ?? Number.NaN);
+  });
+
+  it("never throws and never returns ok for garbage coordinates", () => {
+    expect(model.inverseKinematics([Number.NaN, 0, 60]).status).toBe("unreachable");
+    const probes: readonly (readonly number[])[] = [
+      [0, 0, 0],
+      [-500, -500, -500],
+      [60, 0, -60],
+      [Number.POSITIVE_INFINITY, 0, 60],
+    ];
+    for (const target of probes) {
+      const status = model.inverseKinematics(target as [number, number, number]).status;
+      expect(["ok", "unreachable", "angle-limit"]).toContain(status);
+    }
+  });
+});
+
+describe("generic-chain convergence configuration", () => {
+  it("reports invalid convergence parameters with named problems", () => {
+    const result = createRobotRegistry([
+      {
+        ...ONE_JOINT_CHAIN,
+        ik: { toleranceMm: 0, maxIterations: 0, damping: -1 },
+      },
+    ]);
+    if (result.status !== "invalid-config") throw new Error("expected invalid-config");
+    expect(result.problems.some((p) => p.includes("toleranceMm"))).toBe(true);
+    expect(result.problems.some((p) => p.includes("maxIterations"))).toBe(true);
+    expect(result.problems.some((p) => p.includes("damping"))).toBe(true);
+  });
+
+  it("rejects non-finite convergence parameters", () => {
+    const result = createRobotRegistry([
+      {
+        ...ONE_JOINT_CHAIN,
+        ik: { toleranceMm: Number.NaN, maxIterations: 2.5, damping: Number.POSITIVE_INFINITY },
+      },
+    ]);
+    if (result.status !== "invalid-config") throw new Error("expected invalid-config");
+    expect(result.problems.some((p) => p.includes("toleranceMm"))).toBe(true);
+    expect(result.problems.some((p) => p.includes("maxIterations"))).toBe(true);
+    expect(result.problems.some((p) => p.includes("damping"))).toBe(true);
+  });
+
+  it("enforces the iteration cap: a reachable target fails when the cap is spent", () => {
+    const model = resolveModel({
+      ...mikoShapedChainConfig("tight-cap"),
+      ik: { toleranceMm: 1e-6, maxIterations: 1, damping: 0.05 },
+    });
+    // Reachable with the default 200-iteration budget; one iteration is not enough.
+    expect(model.inverseKinematics(model.forwardKinematics([0.3, 0.5, -0.9]))).toEqual({
+      status: "unreachable",
+    });
+  });
+
+  it("honors a looser tolerance as the acceptance bar", () => {
+    const model = resolveModel({
+      ...mikoShapedChainConfig("loose-tol"),
+      ik: { toleranceMm: 0.5, maxIterations: 200, damping: 0.05 },
+    });
+    const target = model.forwardKinematics([0.3, 0.5, -0.9]);
+    const result = model.inverseKinematics(target);
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect(vec3Distance(model.forwardKinematics(result.joints), target)).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe("generic-chain cross-check against the analytic MiKo-mini solver", () => {
+  function resolved(id: string): RobotModel {
+    const registryResult = createRobotRegistry([DEFAULT_MIKO_MINI_CONFIG, mikoShapedChainConfig()]);
+    if (registryResult.status !== "ok") throw new Error(`registry failed: ${registryResult.problems.join("; ")}`);
+    const model = registryResult.registry.resolve(id);
+    if (!model) throw new Error(`model ${id} was not resolved`);
+    return model;
+  }
+
+  const analytic = resolved("miko-mini");
+  const generic = resolved("miko-generic");
+
+  /** Numeric convergence slack: solver guarantees distance ≤ tolerance. */
+  const TOLERANCE_MM = 1e-6;
+
+  function expectAgreement(target: Vec3): void {
+    const expectedStatus = analytic.inverseKinematics(target).status;
+    const numeric = generic.inverseKinematics(target);
+    if (expectedStatus === "ok") {
+      if (numeric.status !== "ok") throw new Error(`expected ok, got ${numeric.status}`);
+      const distance = vec3Distance(generic.forwardKinematics(numeric.joints), target);
+      expect(distance).toBeLessThanOrEqual(TOLERANCE_MM);
+    } else {
+      expect(numeric.status).toBe(expectedStatus);
+    }
+  }
+
+  it("agrees with the analytic solver across the shoulder-up workspace grid", () => {
+    const q1s = [-2.0, -0.9, 0, 1.1, 2.3];
+    const q2s = [-0.2, 0.35, 0.9, 1.4, 1.8];
+    const q3s = [-2.5, -1.9, -1.2, -0.6, -0.1];
+    for (const q1 of q1s) {
+      for (const q2 of q2s) {
+        for (const q3 of q3s) {
+          expectAgreement(analytic.forwardKinematics([q1, q2, q3]));
+        }
+      }
+    }
+  });
+
+  it("agrees with the analytic solver at its FK reference poses", () => {
+    const poses: readonly (readonly number[])[] = [
+      [0, 0, 0],
+      [Math.PI / 2, 0, 0],
+      [0, Math.PI / 2, -Math.PI / 2],
+      [0, Math.PI / 4, -Math.PI / 2],
+      [Math.PI, -Math.PI / 6, -((5 * Math.PI) / 6)],
+    ];
+    for (const q of poses) {
+      expectAgreement(analytic.forwardKinematics(q));
+    }
+  });
+
+  it("agrees with the analytic solver on failure statuses off the workspace", () => {
+    expectAgreement([500, 0, 60]); // beyond the outer reach
+    expectAgreement([0, 0, -200]); // below the folded reach
+    expectAgreement([60, 0, -60]); // reachable, but the pose violates q2 min
+    expectAgreement([0, 0, 200]); // reachable, but the pose violates q2 max
+  });
+});
+
+describe("generic-chain solver selection", () => {
+  it("rejects a solver the registry does not implement, naming it", () => {
+    const result = createRobotRegistry([
+      { ...ONE_JOINT_CHAIN, solver: "psychic-guess" as unknown as "numeric-dls" },
+    ]);
+    if (result.status !== "invalid-config") throw new Error("expected invalid-config");
+    expect(result.problems.some((p) => p.includes('unsupported solver "psychic-guess"'))).toBe(true);
+  });
+
+  it("builds two independent models from the same chain under different ids", () => {
+    const registryResult = createRobotRegistry([
+      mikoShapedChainConfig("left-arm"),
+      mikoShapedChainConfig("right-arm"),
+    ]);
+    if (registryResult.status !== "ok") throw new Error(`registry failed: ${registryResult.problems.join("; ")}`);
+    const target: Vec3 = [90, 0, 150];
+    for (const id of ["left-arm", "right-arm"]) {
+      const model = registryResult.registry.resolve(id);
+      if (!model) throw new Error(`model ${id} was not resolved`);
+      const result = model.inverseKinematics(target);
+      if (result.status !== "ok") throw new Error(`expected ok from ${id}, got ${result.status}`);
+      expect(vec3Distance(model.forwardKinematics(result.joints), target)).toBeLessThanOrEqual(1e-6);
+    }
+  });
+});
