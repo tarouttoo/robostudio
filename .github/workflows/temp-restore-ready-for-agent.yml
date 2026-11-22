@@ -1,0 +1,44 @@
+name: Temp restore ready-for-agent (one-shot)
+
+# Removed 2026-11-23 ~02:10 +08 to freeze the pipeline overnight (token
+# quota watch): #7, #10, #11, #12 lost ready-for-agent so nothing new fires
+# while the maintainer sleeps. This restores the labels at 03:16 +08
+# (19:16 UTC), when the provider quota resets, and deletes itself.
+# The re-add fires Agent Convert per issue (labeled pulse), so the flow
+# resumes on its own if the blockers closed meanwhile.
+
+on:
+  schedule:
+    - cron: "16 19 22 11 *"
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Restore labels (remove + re-add fires the converter pulse)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: tarouttoo/robostudio
+        run: |
+          for n in 7 10 11 12; do
+            gh issue edit "$n" --remove-label "ready-for-agent" || true
+            gh issue edit "$n" --add-label "ready-for-agent"
+            echo "restored ready-for-agent on #$n"
+          done
+
+      - name: Self-delete this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: tarouttoo/robostudio
+        run: |
+          path=".github/workflows/temp-restore-ready-for-agent.yml"
+          sha=$(gh api "repos/{owner}/{repo}/contents/$path" --jq .sha)
+          gh api --method DELETE "repos/{owner}/{repo}/contents/$path" \
+            -f message="chore: one-shot label restore fired; remove the timer" \
+            -f sha="$sha" >/dev/null
+          echo "timer workflow removed"
