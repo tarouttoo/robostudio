@@ -33,11 +33,15 @@ one manual step left in the happy path (ticket → `agent:implement` → draft P
 ## What is deliberately not done
 
 - **CI gate, verified in-workflow.** Before requesting the merge the step
-  runs `gh pr checks --watch`: it waits out pending checks (a review that
-  finishes before CI isn't held spuriously) and holds with a comment when any
-  check is red, retrying through the seconds-long window where the review's
-  own self-fix push precedes the new head's checks registration (found live:
-  the gate queried 2s before the run registered and held a green PR). The workflow verifies CI itself instead of assuming branch
+  runs its own poll of the check-runs API instead of `gh pr checks`, for
+  two live-found reasons: `gh pr checks` includes the review run's own
+  check — which cannot complete before the gate does, a circular wait — and
+  it answers "no checks reported" in the seconds between the review's
+  self-fix push and the new head's checks registering. The gate waits on
+  every check that is not this pipeline's (agent workflow checks are all
+  named "Agent …") to complete green, holds fast on any red conclusion, and
+  times out into a hold with a comment naming the retry (re-add
+  `agent:review`) when checks never appear. The workflow verifies CI itself instead of assuming branch
   protection, because the auto-merge request rides a maintainer PAT whose
   bypass permissions would defeat protection anyway — the same stance as the
   tenderagent merge gate's `ci_green` condition. A repo with no CI at all

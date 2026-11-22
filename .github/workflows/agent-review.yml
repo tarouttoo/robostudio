@@ -128,24 +128,34 @@ jobs:
           # CI gate: the merge requests ride a PAT that can bypass a future
           # branch protection, so the workflow verifies CI itself instead of
           # assuming protection (same stance as the tenderagent merge gate).
-          # --watch waits out pending checks — a review that finishes before
-          # CI isn't held spuriously — and exits non-zero on any red check.
-          # The review's own self-fix push precedes the new head's checks
-          # registration by a few seconds, and `gh pr checks` answers "no
-          # checks reported" (non-zero) in that window — retry through it
-          # instead of holding (found live: the gate queried 2s before the
-          # run registered and held a green PR).
+          # `gh pr checks` is unusable here for two live-found reasons: it
+          # includes the review run's own check — which cannot complete
+          # before the gate does, a circular wait — and it answers "no
+          # checks reported" in the seconds between the review's self-fix
+          # push and the new head's CI run registering. So poll the
+          # check-runs API directly, wait only on checks that are not this
+          # pipeline's — check runs are named after JOB ids, and the
+          # pipeline's job ids live in the `id:` keys of
+          # .github/workflows/agent-*.yml (rename there, rename here) —
+          # and hold fast on any red conclusion.
+          head_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
           ci_green=""
-          for attempt in $(seq 1 40); do
-            if gh pr checks "$PR_NUMBER" --watch --interval 30; then
+          for attempt in $(seq 1 60); do
+            checks=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" --jq '
+              [.check_runs[]
+               | select((.name == "review" or .name == "implement" or .name == "implement-pr" or .name == "explore" or .name == "convert" or .name == "update-branch") | not)
+               | {name, status, conclusion}]')
+            total=$(jq 'length' <<<"$checks")
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$checks")
+            red=$(jq '[.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required" or .conclusion == "stale" or .conclusion == "startup_failure")] | length' <<<"$checks")
+            if [ "$red" -gt 0 ]; then
+              break
+            fi
+            if [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
               ci_green="yes"
               break
             fi
-            if gh pr checks "$PR_NUMBER" 2>&1 | grep -qi "no checks reported"; then
-              sleep 15
-              continue
-            fi
-            break
+            sleep 15
           done
           if [ -z "$ci_green" ]; then
             echo "CI is not green — holding the merge."
