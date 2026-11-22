@@ -32,13 +32,24 @@ one manual step left in the happy path (ticket → `agent:implement` → draft P
 
 ## What is deliberately not done
 
-- **No CI gate in the workflow.** Without branch protection an auto-merge
-  request merges as soon as the PR is mergeable — red CI included. The proper
-  CI gate is branch protection requiring `ci.yml` checks, which would make
-  auto-merge wait for green; it is recommended but not enabled here, because
-  `windows-latest` CI is red on main (the converter's path-separator test bug
-  from ADR 0010's port) and protection would hold every PR until that is
-  fixed. Enable protection together with that fix.
+- **CI gate, verified in-workflow.** Before requesting the merge the step
+  runs `gh pr checks --watch`: it waits out pending checks (a review that
+  finishes before CI isn't held spuriously) and holds with a comment when any
+  check is red. The workflow verifies CI itself instead of assuming branch
+  protection, because the auto-merge request rides a maintainer PAT whose
+  bypass permissions would defeat protection anyway — the same stance as the
+  tenderagent merge gate's `ci_green` condition. A repo with no CI at all
+  would hold (`gh pr checks` fails with no checks reported); robostudio runs
+  `ci.yml` on every PR, so this is moot here.
+- **The windows CI leg runs app tests only.** The pipeline suites
+  (`.sandcastle`) stub `gh` with POSIX bash scripts and spawn tsx via POSIX
+  paths; the agent workflows they exercise only ever run on ubuntu GitHub
+  runners, so windows CI runs `npm run test:app` (`--exclude
+  ".sandcastle/**"`) instead of failing on the harness (which is what
+  happened since the converter port — the converter's tests were the reason
+  windows CI was red on main when this ADR landed). Branch protection
+  requiring `ci.yml` checks remains the recommended hardening; it is not
+  enabled together with this change so the gate semantics stay in one place.
 - **No tenderagent-style merge gate.** Upstream's deterministic gate
   (review verdict, door cross-check, denylist, changed-line ceiling, blocker
   check) needs the richer verdict payload and the REVIEW_PAT review identity;

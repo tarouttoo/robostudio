@@ -23,7 +23,7 @@ mattpocock/skills speaks in (`needs-triage`, `needs-info`, `ready-for-agent`,
 |---|---|---|---|
 | `agent:implement` | issues | `agent-implement.yml` | Refuses PRD-shaped issues (sub-issues of their own) / issues that already have an open collaborator PR; a child-of-spec Ticket passes and its parent Spec is pulled in as context. On success labels the new draft PR `agent:review`. |
 | `agent:implement` | PRs | `agent-implement-pr.yml` | Processes review feedback: replies to threads, addresses inline comments, pushes with a lease. |
-| `agent:review` | PRs | `agent-review.yml` | On success marks the PR ready and requests a squash auto-merge (ADR 0011) — held with a comment when the review posted inline comments. |
+| `agent:review` | PRs | `agent-review.yml` | On success marks the PR ready and requests a squash auto-merge (ADR 0011) — held with a comment when the review posted inline comments or CI is not green. |
 | `agent:update-branch` | PRs | `agent-update-branch.yml` | Always resolves merge conflicts with `main`, never aborts. |
 | `agent:explore` | issues | `agent-explore.yml` | Batch triage. See the exception below. |
 
