@@ -62,6 +62,11 @@ describe("discretization of a line", () => {
     const traj = trajectory(vec3(0, 0, 0), []);
     expect(() => discretizeTrajectory(traj, { maxStepMm: 0 })).toThrow(RangeError);
   });
+
+  it("rejects a negative merge distance", () => {
+    const traj = trajectory(vec3(0, 0, 0), []);
+    expect(() => discretizeTrajectory(traj, { mergeDistanceMm: -1 })).toThrow(RangeError);
+  });
 });
 
 describe("discretization of arcs", () => {

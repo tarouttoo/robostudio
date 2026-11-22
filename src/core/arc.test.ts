@@ -325,6 +325,27 @@ describe("arc geometry", () => {
     expect(mid.z).toBeCloseTo(10 * Math.sin(Math.PI / 4), 12);
   });
 
+  it("builds and evaluates a YZ arc with (y, z) as the in-plane pair", () => {
+    // CCW in (y, z) viewed from +x: from +y toward +z around the origin.
+    const arc = arcFromCenter({
+      plane: "YZ",
+      start: vec3(0, 10, 0),
+      end: vec3(0, 0, 10),
+      center: vec3(0, 0, 0),
+      direction: "CCW",
+      feed: 20,
+    });
+    expect(arc.radiusMm).toBeCloseTo(10, 12);
+    // A swapped (u, v) mapping would sweep the complementary 3π/2 here.
+    expect(arc.sweepRad).toBeCloseTo(Math.PI / 2, 12);
+    // An asymmetric sample (the diagonal midpoint is transposition-proof).
+    const eighth = arcPointAt(arc, 0.25);
+    expect(eighth.x).toBe(0);
+    expect(eighth.y).toBeCloseTo(10 * Math.cos(Math.PI / 8), 12);
+    expect(eighth.z).toBeCloseTo(10 * Math.sin(Math.PI / 8), 12);
+    expect(arcLengthMm(arc)).toBeCloseTo(5 * Math.PI, 10);
+  });
+
   it("computes arc length as radius times sweep magnitude", () => {
     const arc = arcFromCenter({
       plane: "XY",
