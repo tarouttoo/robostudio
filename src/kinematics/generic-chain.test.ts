@@ -111,6 +111,12 @@ describe("generic-chain forward kinematics", () => {
     expect(atQuarter[2]).toBeCloseTo(0, 9);
   });
 
+  it("rejects joint arrays of the wrong length instead of returning NaN", () => {
+    const model = resolveModel(ONE_JOINT_CHAIN);
+    expect(() => model.forwardKinematics([])).toThrow(/expects 1 joint angles/);
+    expect(() => model.forwardKinematics([0, 0])).toThrow(/expects 1 joint angles/);
+  });
+
   it("matches the analytic MiKo-mini FK when the chain describes the same geometry", () => {
     const analytic = resolveModel(DEFAULT_MIKO_MINI_CONFIG);
     const generic = resolveModel(mikoShapedChainConfig());
@@ -260,6 +266,12 @@ describe("generic-chain convergence configuration", () => {
     expect(result.problems.some((p) => p.includes("toleranceMm"))).toBe(true);
     expect(result.problems.some((p) => p.includes("maxIterations"))).toBe(true);
     expect(result.problems.some((p) => p.includes("damping"))).toBe(true);
+  });
+
+  it("rejects a chain without joints with a named problem", () => {
+    const result = createRobotRegistry([{ ...ONE_JOINT_CHAIN, joints: [] }]);
+    if (result.status !== "invalid-config") throw new Error("expected invalid-config");
+    expect(result.problems.some((p) => p.includes("requires at least one joint"))).toBe(true);
   });
 
   it("rejects non-finite convergence parameters", () => {

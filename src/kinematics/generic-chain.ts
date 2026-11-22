@@ -380,6 +380,9 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
 
   const joints = config.joints;
   const axes = joints.map((joint) => normalize(joint.axis));
+  // Seeds depend only on the fixed joint limits, so compute them once at
+  // build instead of on every inverseKinematics call.
+  const seeds = seedsFor(joints);
 
   const forwardKinematics = (angles: readonly number[]): Vec3 => {
     if (angles.length !== joints.length) {
@@ -392,7 +395,7 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
     // Phase 1 — limit-aware: steps are clamped into the joint limits, so
     // convergence yields an in-limits solution directly. Each seed gets
     // its own descent; the first success wins.
-    for (const seed of seedsFor(joints)) {
+    for (const seed of seeds) {
       const constrained = runDampedLeastSquares(joints, axes, target, config.ik, true, seed);
       if (constrained) return { status: "ok", joints: constrained };
     }
@@ -403,7 +406,7 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
     // no convergence at all is the named unreachable failure — never a
     // throw or an unbounded loop.
     let violation: IKResult | undefined;
-    for (const seed of seedsFor(joints)) {
+    for (const seed of seeds) {
       const free = runDampedLeastSquares(joints, axes, target, config.ik, false, seed);
       if (!free) continue;
       const wrapped = wrapIntoLimits(joints, free);
