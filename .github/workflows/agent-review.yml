@@ -102,6 +102,41 @@ jobs:
         if: success()
         run: gh pr ready "$PR_NUMBER" || true
 
+      # The human merge click, automated (ADR 0011): a clean review — zero
+      # inline comments in the extracted payload — requests a squash
+      # auto-merge, which GitHub performs as soon as the PR is mergeable.
+      # The request rides AGENT_PAT when present: GITHUB_TOKEN-authored PRs
+      # refuse auto-merge requests from their own GITHUB_TOKEN, and the PAT
+      # keeps the eventual merge attributed to the maintainer, not
+      # github-actions[bot]. Findings hold the merge loudly instead: the
+      # comment names the retry loop (agent:implement-pr, then re-add
+      # agent:review) so a held PR never silently merges past unresolved
+      # findings.
+      - name: Request auto-merge on clean review
+        if: success()
+        env:
+          PAYLOAD: ${{ runner.temp }}/review_payload.json
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          findings=$(jq '.inlineComments | length' "$PAYLOAD")
+          if [ "$findings" -gt 0 ]; then
+            echo "Review posted $findings inline comment(s) — holding the merge."
+            gh pr comment "$PR_NUMBER" --body "Review posted **$findings** inline comment(s) — auto-merge held. Address them (label the PR \`agent:implement-pr\`), then re-add \`agent:review\`."
+            exit 0
+          fi
+          set +e
+          if [ -n "$AGENT_PAT" ]; then
+            GH_TOKEN="$AGENT_PAT" gh pr merge "$PR_NUMBER" --squash --auto --delete-branch
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              echo "Squash auto-merge requested; GitHub merges when the PR is mergeable."
+              exit 0
+            fi
+            echo "AGENT_PAT auto-merge request failed (status $status); trying GITHUB_TOKEN."
+          fi
+          GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr merge "$PR_NUMBER" --squash --auto --delete-branch
+
       - name: Post thread replies
         if: success()
         env:
