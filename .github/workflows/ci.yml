@@ -53,8 +53,19 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
+      # The pipeline suites (.sandcastle) stub `gh` with POSIX bash scripts
+      # and spawn the tsx CLI via POSIX paths — they exercise agent-workflow
+      # code that only ever runs on ubuntu GitHub runners. The windows leg of
+      # the matrix exists for the Electron app, so it runs the app tests
+      # only, instead of failing on the pipeline harness or pretending
+      # dual-OS coverage of bash stubs.
+      - name: Test (app + agent workflows)
+        if: runner.os == 'Linux'
         run: npm test
+
+      - name: Test (app only)
+        if: runner.os != 'Linux'
+        run: npm run test:app
 
       # Exercise the production bundling path (renderer via Vite, main
       # ESM + preload CJS via esbuild) so a broken build fails the PR

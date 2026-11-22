@@ -125,6 +125,16 @@ jobs:
             gh pr comment "$PR_NUMBER" --body "Review posted **$findings** inline comment(s) — auto-merge held. Address them (label the PR \`agent:implement-pr\`), then re-add \`agent:review\`."
             exit 0
           fi
+          # CI gate: the merge requests ride a PAT that can bypass a future
+          # branch protection, so the workflow verifies CI itself instead of
+          # assuming protection (same stance as the tenderagent merge gate).
+          # --watch waits out pending checks — a review that finishes before
+          # CI isn't held spuriously — and exits non-zero on any red check.
+          if ! gh pr checks "$PR_NUMBER" --watch --interval 30; then
+            echo "CI is not green — holding the merge."
+            gh pr comment "$PR_NUMBER" --body "CI is not green on the head commit — auto-merge held. When CI passes, re-add \`agent:review\` (the review findings are already clean)."
+            exit 0
+          fi
           set +e
           if [ -n "$AGENT_PAT" ]; then
             GH_TOKEN="$AGENT_PAT" gh pr merge "$PR_NUMBER" --squash --auto --delete-branch

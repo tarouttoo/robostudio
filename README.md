@@ -75,7 +75,7 @@ README remains the reference for upstream deviations and pipeline internals.
 |---|---|---|
 | `agent:implement` (issue) | `agent-implement.yml` | Preflight gates (refuses PRD-shaped issues / issues with an open collaborator PR; a child-of-spec Ticket passes and its parent Spec is pulled in as context), then an agent implements on an isolated branch and opens a draft PR that closes the issue, then labels the PR `agent:review`. |
 | `agent:implement` (PR) | `agent-implement-pr.yml` | Processes review feedback on an existing PR: replies to threads, addresses inline comments, pushes with a lease. |
-| `agent:review` | `agent-review.yml` | Reviews the PR, self-fixes findings on the branch, posts a PR review, replies to threads, marks the PR ready, then requests a squash auto-merge on a clean review (ADR 0011). |
+| `agent:review` | `agent-review.yml` | Reviews the PR, self-fixes findings on the branch, posts a PR review, replies to threads, marks the PR ready, then requests a squash auto-merge on a clean review with green CI (ADR 0011). |
 | `agent:update-branch` | `agent-update-branch.yml` | Resolves merge conflicts with `main` (always resolve, never abort) and pushes. |
 | `agent:explore` | `agent-explore.yml` | Batch triage: one agent run plans effects for every open `agent:explore` issue; a separate apply job validates the plan and applies it. Supports `workflow_dispatch` dry-run. |
 | `ready-for-agent` (issue) | `agent-convert.yml` | The ready-for-agent converter: a Ticket labelled `ready-for-agent` is evaluated on labelling and re-scanned whenever another issue closes; when the last blocker closes, the label is swapped for `agent:implement` (added with `AGENT_PAT` so the cascade fires), otherwise a comment names the open blockers. |
