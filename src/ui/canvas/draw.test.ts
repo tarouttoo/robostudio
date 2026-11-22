@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../core/vec";
+import { line } from "../../core/trajectory";
+import { vec2, vec3 } from "../../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../../kinematics/miko-mini";
 import { checkSegmentReachability } from "../../kinematics/reachability";
 import { createRobotRegistry } from "../../kinematics/registry";
 import type { RobotModel } from "../../kinematics/robot-model";
-import { line } from "../../core/trajectory";
 import { drawScene, VIOLATION_COLOR } from "./draw";
 import { REACHABILITY_COLORS, createReachabilitySampler } from "./reachability";
 import { makeCanvasTransform } from "./transform";
-import { vec2 } from "../../core/vec";
 
 function defaultModel(): RobotModel {
   const result = createRobotRegistry([DEFAULT_MIKO_MINI_CONFIG]);

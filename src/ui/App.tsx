@@ -191,7 +191,7 @@ export function App() {
                   }}
                 >
                   {formatVec3(state.home)}
-                  {homeStatus !== null && homeStatus !== "ok" ? " — недостижимо" : ""}
+                  {homeStatus !== null && homeStatus !== "ok" ? ` — ${statusWord(homeStatus)}` : ""}
                 </span>
               )}
             </div>
@@ -270,13 +270,25 @@ function LegendSwatch(props: { readonly color: string; readonly label: string })
   );
 }
 
+/** The Russian UI word for one Reachability status, as in the legend. */
+function statusWord(status: PointReachability): string {
+  switch (status) {
+    case "ok":
+      return "достижимо";
+    case "unreachable":
+      return "недостижимо";
+    case "angle-limit":
+      return "предел шарнира";
+  }
+}
+
 /** The Russian UI note for one Reachability violation, naming the place and cause. */
 function violationLabel(violation: ReachabilityViolation): string {
   switch (violation.status) {
     case "unreachable":
-      return `недостижимо (${formatVec3(violation.atMm)})`;
+      return `${statusWord(violation.status)} (${formatVec3(violation.atMm)})`;
     case "angle-limit":
-      return `предел шарнира ${violation.joint} (${violation.bound === "min" ? "мин" : "макс"})`;
+      return `${statusWord(violation.status)} ${violation.joint} (${violation.bound === "min" ? "мин" : "макс"})`;
   }
 }
 
