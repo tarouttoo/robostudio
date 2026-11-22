@@ -41,7 +41,7 @@ jobs:
       # by editing env vars only). Consumed by agentFromEnv() in
       # .sandcastle/agent-workflows/shared/common.ts.
       AGENT_PROVIDER: zai
-      AGENT_MODEL: glm-5.3-flash
+      AGENT_MODEL: glm-5.3-flash:max
 
     steps:
       - name: Transition labels

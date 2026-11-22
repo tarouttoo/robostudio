@@ -98,6 +98,8 @@ trigger label named in that comment.
 
 The provider/model is set per workflow via `AGENT_PROVIDER` and
 `AGENT_MODEL` env vars; nothing in code needs to change to tune them.
+Currently `zai` / `glm-5.3-flash:max` — the `:max` suffix is pi's thinking
+level, passed verbatim through the sandcastle print command to the pi CLI.
 
 ### One-way doors for the review pass
 

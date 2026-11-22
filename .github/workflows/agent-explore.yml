@@ -94,7 +94,7 @@ jobs:
           # quality by editing env vars only). Consumed by agentFromEnv() in
           # .sandcastle/agent-workflows/shared/common.ts.
           AGENT_PROVIDER: zai
-          AGENT_MODEL: glm-5.3-flash
+          AGENT_MODEL: glm-5.3-flash:max
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           ISSUES_FILE: ${{ runner.temp }}/batch/issues.json
           OUTPUT_DIR: ${{ runner.temp }}/out
