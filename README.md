@@ -78,10 +78,13 @@ README remains the reference for upstream deviations and pipeline internals.
 | `agent:review` | `agent-review.yml` | Reviews the PR, self-fixes findings on the branch, posts a PR review, replies to threads, marks the PR ready. |
 | `agent:update-branch` | `agent-update-branch.yml` | Resolves merge conflicts with `main` (always resolve, never abort) and pushes. |
 | `agent:explore` | `agent-explore.yml` | Batch triage: one agent run plans effects for every open `agent:explore` issue; a separate apply job validates the plan and applies it. Supports `workflow_dispatch` dry-run. |
+| `ready-for-agent` (issue) | `agent-convert.yml` | The ready-for-agent converter: a Ticket labelled `ready-for-agent` is evaluated on labelling and re-scanned whenever another issue closes; when the last blocker closes, the label is swapped for `agent:implement` (added with `AGENT_PAT` so the cascade fires), otherwise a comment names the open blockers. |
 
-Every run posts a failure comment with a reason and the workflow-run link,
-and relabels the subject `agent:blocked`. Retrying means re-adding the
-trigger label named in that comment.
+Every agent run posts a failure comment with a reason and the workflow-run
+link, and relabels the subject `agent:blocked`. Retrying means re-adding the
+trigger label named in that comment. For a converted Ticket — one that was
+waiting on `ready-for-agent` — retry it by removing and re-adding
+`ready-for-agent`.
 
 ### Required repository settings
 
@@ -132,6 +135,19 @@ Anything that ships outward is treated as irreversible: the robot CSV and
 RViz CSV formats (pinned by golden tests, `docs/adr/0006-csv-contracts-pinned-by-tests.md`),
 the versioned project-file schema, and release publishing. The review pass
 reads this section when auditing the Merge Danger call in the PR body.
+
+## Deviations
+
+This repo tracks `agent-pipeline-template` (itself a sandcastle port);
+where it deliberately diverges:
+
+1. **Agent model** — every workflow runs `zai` / `glm-5.3-flash:max` via the
+   env vars; the `:max` suffix is pi's thinking level, passed verbatim
+   through the sandcastle print command.
+2. **The `ready-for-agent` converter** — kept from the template even though
+   upstream sandcastle lacks it; it is what lets the skills' to-spec /
+   to-tickets flow feed the pipeline without manual relabelling
+   ([ADR 0010](docs/adr/0010-ready-for-agent-converter.md)).
 
 ## Attribution
 

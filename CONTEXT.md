@@ -45,6 +45,11 @@ Actions, ported from mattpocock/sandcastle) that implements
 - **Lifecycle label** — a label the pipeline manages on its own:
   `agent:in-progress` while a run is active, `agent:blocked` when a run
   fails (with a failure comment naming the trigger label to re-add).
+- **Triage label** — `ready-for-agent`: the waiting approval for a blocked
+  Ticket. The converter (`agent-convert.yml`) re-scans it whenever another
+  issue closes and swaps it for `agent:implement` when the last blocker
+  closes; a failed converted run is retried by a label cycle (remove and
+  re-add `ready-for-agent`).
 - **Subject** — the issue or PR a run is about. Concurrency groups are
   keyed per subject so parallel label events queue instead of racing.
 - **Draft PR** — the pull request the implement workflow opens against
