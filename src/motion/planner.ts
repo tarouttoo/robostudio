@@ -15,7 +15,9 @@
  *   and the S-curve has zero velocity and acceleration at boundaries.
  * - Ranges are split by Segment and Feed: each planned Segment gets one
  *   time range whose length the Feed sets (mean tangential speed =
- *   Feed), stretched by time scaling until the dynamic limits hold.
+ *   Feed), stretched by time scaling until the dynamic limits hold and
+ *   floored at one control step, so every range owns at least one row
+ *   and no planned Segment's motion can drop off the grid.
  * - Input or output that cannot satisfy the contract fails with a
  *   named `MotionError`.
  */
@@ -35,6 +37,14 @@ const TIME_SCALE_SAFETY = 1.02;
 
 /** Iteration cap of the time-scaling loop before it fails loudly. */
 const MAX_SCALE_ITERATIONS = 64;
+
+/**
+ * Scaling budget: a Segment stretched beyond this multiple of its
+ * Feed-nominal duration signals unusable dynamic limits (zero or
+ * vanishing) rather than slow motion, and fails loudly before the grid
+ * probing of the next round grows unbounded.
+ */
+const MAX_TIME_SCALEUP = 10_000;
 
 /** Slack on limit comparisons, absorbing roundoff in the limit check. */
 const LIMIT_SLACK = 1e-9;
@@ -161,7 +171,7 @@ export function createPchipPlanner(model: RobotModel): Planner {
     }));
 
     const rows = emitRows(scaled, totalMs, jointCount);
-    verifyPlan(model, rows);
+    verifyPlan(model, ranges, rows);
 
     return {
       rows,
@@ -262,13 +272,16 @@ function collectSegmentPlans(input: PlannerInput, model: RobotModel): SegmentPla
  * Iteratively stretches the Segment's duration until velocity,
  * acceleration, and jerk at the grid rows and the Segment's endpoints
  * respect every joint's dynamic limits. The nominal duration follows
- * the Feed (mean tangential speed = Feed); each round grows it by the
- * worst required factor — velocity scales as 1/T, acceleration as
- * 1/T², jerk as 1/T³ — plus a small safety margin.
+ * the Feed (mean tangential speed = Feed), floored at one control
+ * step: a Segment finishing inside a single grid gap would own no row
+ * and its motion would vanish from the plan. Each round grows the
+ * duration by the worst required factor — velocity scales as 1/T,
+ * acceleration as 1/T², jerk as 1/T³ — plus a small safety margin.
  */
 function scaleSegmentDuration(seg: SegmentPlan, tStartMs: number): number {
   const lengthMm = seg.sEnd - seg.sStart;
-  let durationMs = (lengthMm / seg.feed) * 1000;
+  const nominalMs = (lengthMm / seg.feed) * 1000;
+  let durationMs = Math.max(nominalMs, CONTROL_STEP_MS);
   for (let iteration = 0; iteration < MAX_SCALE_ITERATIONS; iteration++) {
     let needed = 1;
     for (const tau of scaleSampleTaus(tStartMs, durationMs)) {
@@ -289,6 +302,12 @@ function scaleSegmentDuration(seg: SegmentPlan, tStartMs: number): number {
     }
     if (needed <= 1) return durationMs;
     durationMs *= needed * TIME_SCALE_SAFETY;
+    if (!Number.isFinite(durationMs) || durationMs > nominalMs * MAX_TIME_SCALEUP) {
+      throw new MotionError(
+        "TimeScalingFailed",
+        `segment ${seg.segmentIndex} needs more than a ${MAX_TIME_SCALEUP}× stretch of its ${nominalMs} ms nominal duration: the dynamic limits cannot be met`,
+      );
+    }
   }
   throw new MotionError(
     "TimeScalingFailed",
@@ -348,12 +367,23 @@ function emitRows(scaled: readonly ScaledSegment[], totalMs: number, jointCount:
 }
 
 /**
- * Validates the plan output against the contract: rows on the control
- * grid, strictly increasing, finite, and within the Robot Model's
- * dynamic limits. The stages of the pipeline validate their own
- * output (GLOSSARY.md); a defect here is a named `VerificationFailed`.
+ * Validates the plan output against the contract: every range owns at
+ * least one row (no Segment's motion dropped off the grid), and rows
+ * on the control grid, strictly increasing, finite, and within the
+ * Robot Model's dynamic limits. The stages of the pipeline validate
+ * their own output (GLOSSARY.md); a defect here is a named
+ * `VerificationFailed`.
  */
-function verifyPlan(model: RobotModel, rows: readonly MotionRow[]): void {
+function verifyPlan(model: RobotModel, ranges: readonly PlanSegmentRange[], rows: readonly MotionRow[]): void {
+  for (const range of ranges) {
+    const ownsARow = rows.some((row) => row.tMs >= range.startMs && row.tMs < range.endMs);
+    if (!ownsARow) {
+      throw new MotionError(
+        "VerificationFailed",
+        `segment ${range.segmentIndex} range [${range.startMs}, ${range.endMs}] ms owns no control rows: its motion dropped off the grid`,
+      );
+    }
+  }
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] as MotionRow;
     if (row.tMs !== i * CONTROL_STEP_MS) {

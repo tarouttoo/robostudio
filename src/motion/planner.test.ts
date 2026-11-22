@@ -95,15 +95,11 @@ describe("planner seam: time grid", () => {
     const { path, solutions } = planInputFromTrajectory(model, traj);
     const plan = planner.plan({ path, solutions });
 
-    const first = path.samples[0];
-    const last = path.samples[path.samples.length - 1];
     expect(plan.rows[0]?.q).toEqual(solutions[0]);
     expect(plan.rows[0]?.tMs).toBe(0);
     plan.rows[plan.rows.length - 1]?.q.forEach((value, j) => {
       expect(value).toBeCloseTo(solutions[solutions.length - 1]?.[j] as number, 9);
     });
-    void first;
-    void last;
   });
   it("keeps velocity, acceleration, and jerk within the Robot Model's dynamic limits", () => {
     const traj = trajectory(vec3(80, 0, 60), [
@@ -317,6 +313,105 @@ describe("planner seam: segment boundaries", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(MotionError);
       expect((error as MotionError).tag).toBe("InvalidSolution");
+    }
+  });
+});
+
+describe("planner seam: sub-step Segments", () => {
+  /**
+   * A straight-line Robot Model with the given dynamic limits: FK maps
+   * q1·100 → x (so joint angle = path length / 100), IK inverts that.
+   * The Planner seam takes any Robot Model (ADR 0008); this one makes
+   * sub-step timing observable without MiKo-mini's jerk inflating every
+   * short Segment past the grid.
+   */
+  function straightLineModel(limits: {
+    maxVelocityRadS: number;
+    maxAccelerationRadS2: number;
+    maxJerkRadS3: number;
+  }): RobotModel {
+    const joints: JointConfig[] = [0, 1, 2].map((j) => ({
+      name: `q${j + 1}`,
+      minRad: -10,
+      maxRad: 10,
+      ...limits,
+    }));
+    return {
+      id: "straight-line",
+      name: "Straight Line",
+      joints,
+      forwardKinematics: (q) => [q[0]! * 100, q[1]! * 100, q[2]! * 100],
+      inverseKinematics: (target) => ({
+        status: "ok" as const,
+        joints: [target[0]! / 100, target[1]! / 100, target[2]! / 100],
+      }),
+    };
+  }
+
+  it("keeps a Segment shorter than one control step on the grid: its motion is not dropped", () => {
+    const model = straightLineModel({
+      maxVelocityRadS: 1e9,
+      maxAccelerationRadS2: 1e9,
+      maxJerkRadS3: 1e9,
+    });
+    const planner = createPchipPlanner(model);
+    // 2.133 mm at 100 mm/s → 21.33 ms: the second Segment starts off-grid.
+    // 1 mm at 100 mm/s → 10 ms nominal: shorter than the 20 ms control
+    // step, so its unrounded window [21.33, 31.33) contains no grid moment
+    // — without the one-step duration floor its motion would vanish from
+    // the emitted rows.
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(2.133, 0, 0), feed: 100 }),
+      line({ start: vec3(2.133, 0, 0), end: vec3(3.133, 0, 0), feed: 100 }),
+    ]);
+    const plan = planFromTrajectory(planner, model, traj);
+
+    expect(plan.ranges).toHaveLength(2);
+    const [, short] = plan.ranges;
+    expect(short?.startMs).toBeGreaterThan(0);
+    // One-step duration floor (1e-9: range arithmetic in floats).
+    expect(short!.endMs - short!.startMs).toBeGreaterThanOrEqual(CONTROL_STEP_MS - 1e-9);
+
+    // Every planned Segment owns at least one row of the emitted grid.
+    for (const range of plan.ranges) {
+      const owned = plan.rows.filter((row) => row.tMs >= range.startMs && row.tMs < range.endMs);
+      expect(owned.length).toBeGreaterThan(0);
+    }
+
+    // The short Segment's motion is on the grid: its first owned row sits
+    // strictly inside the Segment (straight-line FK: q1 = x/100) and the
+    // plan ends at its end pose.
+    const shortRows = plan.rows.filter((row) => row.segmentIndex === 1);
+    expect(shortRows.length).toBeGreaterThan(1);
+    const interior = shortRows[0]!;
+    expect(interior.q[0] as number).toBeGreaterThan(2.133 / 100);
+    expect(interior.q[0] as number).toBeLessThan(3.133 / 100);
+    plan.rows[plan.rows.length - 1]?.q.forEach((value, j) => {
+      const expected = j === 0 ? 3.133 / 100 : 0;
+      expect(value).toBeCloseTo(expected, 12);
+    });
+  });
+
+  it("fails with a named TimeScalingFailed when the dynamic limits cannot be met", () => {
+    // A zero jerk limit makes the required stretch unbounded; the planner
+    // must name the failure instead of leaking a raw RangeError.
+    const model = straightLineModel({
+      maxVelocityRadS: 1e9,
+      maxAccelerationRadS2: 1e9,
+      maxJerkRadS3: 0,
+    });
+    const planner = createPchipPlanner(model);
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 100 }),
+    ]);
+    const { path, solutions } = planInputFromTrajectory(model, traj);
+
+    try {
+      planner.plan({ path, solutions });
+      throw new Error("expected a MotionError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(MotionError);
+      expect((error as MotionError).tag).toBe("TimeScalingFailed");
     }
   });
 });
