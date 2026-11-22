@@ -5,7 +5,7 @@ act on, how to hand work to the agents, and what is still yours to do.
 Label semantics live in [docs/labels.md](labels.md); the canonical triage
 roles the skills speak in (`needs-triage`, `needs-info`, `ready-for-agent`,
 `ready-for-human`, `wontfix`) map onto those labels in
-[docs/agents/triage.md](agents/triage.md); per-workflow detail in the
+[docs/agents/triage-labels.md](agents/triage-labels.md); per-workflow detail in the
 [Workflows table](../README.md#workflows).
 
 ## The core loop

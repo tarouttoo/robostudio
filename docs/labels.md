@@ -13,7 +13,7 @@ the loop day to day — writing triageable issues, reviewing draft PRs,
 acting on verdicts: [docs/triage.md](triage.md). The canonical triage roles
 mattpocock/skills speaks in (`needs-triage`, `needs-info`, `ready-for-agent`,
 `ready-for-human`, `wontfix`) map onto the labels below in
-[docs/agents/triage.md](agents/triage.md).
+[docs/agents/triage-labels.md](agents/triage-labels.md).
 
 ## Trigger labels
 

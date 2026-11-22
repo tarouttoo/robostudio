@@ -40,7 +40,7 @@ Report back to whoever asked. Don't comment on, label or close the issue, and do
 - whether it reproduced: yes, no or inconclusive
 - the repro script and its key output
 - the likely cause, with `file:line`
-- a suggested triage label from `docs/agents/triage.md`
+- a suggested triage label from `docs/agents/triage-labels.md`
 
 ## Commenting on GitHub
 
