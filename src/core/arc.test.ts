@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { arcFromCenter, arcFromRadius, arcLengthMm, arcPointAt } from "./arc";
+import { arcFromCenter, arcFromRadius, arcLengthMm, arcPointAt, sweepRad } from "./arc";
 import { CoreError } from "./errors";
-import { vec3 } from "./vec";
+import { vec2, vec3 } from "./vec";
 
 /** Runs `fn` and returns the tag of the CoreError it throws. */
 function errorTagOf(fn: () => unknown): string {
@@ -55,6 +55,19 @@ describe("arc from center", () => {
       feed: 20,
     });
     expect(arc.sweepRad).toBeCloseTo(2 * Math.PI, 10);
+    expect(arcLengthMm(arc)).toBeCloseTo(2 * Math.PI * 50, 9);
+  });
+
+  it("gives a CW full circle a negative full-turn sweep", () => {
+    const arc = arcFromCenter({
+      plane: "XY",
+      start: vec3(50, 0, 0),
+      end: vec3(50, 0, 0),
+      center: vec3(0, 0, 0),
+      direction: "CW",
+      feed: 20,
+    });
+    expect(arc.sweepRad).toBeCloseTo(-2 * Math.PI, 10);
     expect(arcLengthMm(arc)).toBeCloseTo(2 * Math.PI * 50, 9);
   });
 
@@ -322,5 +335,39 @@ describe("arc geometry", () => {
       feed: 20,
     });
     expect(arcLengthMm(arc)).toBeCloseTo(10 * (3 * Math.PI / 2), 10);
+  });
+
+  it("promotes only a coincident chord to a full circle sweep", () => {
+    const origin = vec2(0, 0);
+    // Exactly coincident endpoints → full turn.
+    expect(sweepRad(vec2(50, 0), vec2(50, 0), origin, "CCW")).toBeCloseTo(2 * Math.PI, 12);
+    expect(sweepRad(vec2(50, 0), vec2(50, 0), origin, "CW")).toBeCloseTo(-2 * Math.PI, 12);
+    // Distinct endpoints on one circle a dust-level angle apart → the
+    // real sweep, not a full turn.
+    const angle = 1e-10;
+    const tiny = sweepRad(
+      vec2(50, 0),
+      vec2(50 * Math.cos(angle), 50 * Math.sin(angle)),
+      origin,
+      "CCW",
+    );
+    expect(tiny).toBeGreaterThan(0);
+    expect(tiny).toBeLessThan(1e-8);
+  });
+
+  it("keeps a dust chord on a huge radius a tiny arc, not a full circle", () => {
+    // A 0.1 µm chord on a 1 m radius sweeps 1e-10 rad: a real,
+    // near-zero-length arc. It must not be promoted to a full circle,
+    // whose length here would exceed it by 11 orders of magnitude.
+    const arc = arcFromRadius({
+      plane: "XY",
+      start: vec3(0, 0, 0),
+      end: vec3(1e-4, 0, 0),
+      radiusMm: 1e6,
+      direction: "CCW",
+      feed: 20,
+    });
+    expect(Math.abs(arc.sweepRad)).toBeLessThan(1e-8);
+    expect(arcLengthMm(arc)).toBeCloseTo(1e-4, 9);
   });
 });

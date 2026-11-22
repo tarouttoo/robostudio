@@ -170,6 +170,23 @@ describe("transits", () => {
     expect(path.totalLengthMm).toBeCloseTo(15, 10);
   });
 
+  it("emits the arrival sample across a gap between Segments, counted at full distance", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 20 }),
+      line({ start: vec3(15, 0, 0), end: vec3(25, 0, 0), feed: 20 }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // 21 samples per line: the 5 mm gap hops straight from (10, 0, 0)
+    // to the second line's arrival at (15, 0, 0), counted in full.
+    expect(path.samples).toHaveLength(42);
+    const arrival = path.samples[21];
+    expect(arrival?.position).toEqual(vec3(15, 0, 0));
+    expect(arrival?.pathLengthMm).toBeCloseTo(15, 10);
+    expect(arrival?.segmentIndex).toBe(1);
+    expect(path.totalLengthMm).toBeCloseTo(25, 10);
+    expectMonotonicLengths(path.samples);
+  });
+
   it("moves to a Point target as a single transit sample", () => {
     const traj = trajectory(vec3(0, 0, 0), [
       line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),

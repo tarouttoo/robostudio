@@ -24,8 +24,6 @@ import {
 } from "./trajectory";
 import { vec2, vec3, type Vec2, type Vec3 } from "./vec";
 
-/** Two angles are "the same direction" below this many radians. */
-const ANGLE_EPS_RAD = 1e-9;
 /** Two coordinates agree (in-plane, on-circle) below this many mm. */
 const COORD_EPS_MM = 1e-6;
 /** A chord counts as zero below this many mm. */
@@ -77,7 +75,9 @@ export function planePoint(plane: WorkingPlane, u: number, v: number, w: number)
  * Resolves the circle center from a radius and the chord start → end.
  * For CCW the center lies 90° left of the chord; for CW 90° right,
  * giving the minor arc (≤ 180°) in both directions. Returns null when
- * the endpoints are farther apart than `2·radiusMm` allows.
+ * the endpoints are farther apart than `2·radiusMm` allows; throws an
+ * `ArcAmbiguousCenter` `CoreError` when the endpoints coincide (a chord
+ * of zero cannot resolve a center).
  */
 export function resolveCenterFromRadius(
   start2: Vec2,
@@ -121,8 +121,13 @@ export function sweepRad(
   const endAngle = Math.atan2(end2.y - center2.y, end2.x - center2.x);
   const raw = direction === "CCW" ? endAngle - startAngle : startAngle - endAngle;
   const positive = ((raw % TAU) + TAU) % TAU;
-  // Coincident endpoints (dust-level sweep) mean a full circle.
-  return (positive <= ANGLE_EPS_RAD ? TAU : positive) * (direction === "CCW" ? 1 : -1);
+  // A dust-level chord means coincident endpoints — a full circle. The
+  // test is on distance, not on the sweep angle: an angle epsilon would
+  // misclassify a real, near-zero-length arc on a huge radius (a 0.1 µm
+  // chord on a 1 m radius sweeps 1e-10 rad but is not a full circle).
+  const chord = Math.hypot(end2.x - start2.x, end2.y - start2.y);
+  const sweep = chord <= CHORD_EPS_MM ? TAU : positive;
+  return sweep * (direction === "CCW" ? 1 : -1);
 }
 
 /**
