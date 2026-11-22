@@ -1,4 +1,8 @@
 import {
+  createGenericChainModel,
+  type GenericChainRobotConfig,
+} from "./generic-chain";
+import {
   createMiKoMiniModel,
   type MiKoMiniRobotConfig,
 } from "./miko-mini";
@@ -9,7 +13,7 @@ import type { RobotModel } from "./robot-model";
  * new config kind plus, at most, a solver — no registry changes for
  * callers (ADR 0008).
  */
-export type RobotModelConfig = MiKoMiniRobotConfig;
+export type RobotModelConfig = MiKoMiniRobotConfig | GenericChainRobotConfig;
 
 /** The result of {@link createRobotRegistry}. */
 export type RegistryResult =
@@ -43,18 +47,36 @@ export function createRobotRegistry(configs: readonly RobotModelConfig[]): Regis
       continue;
     }
     seen.add(config.id);
-    if (config.kind !== "miko-mini") {
-      problems.push(`unsupported model kind "${String(config.kind)}" for id "${config.id}"`);
-      continue;
-    }
-    const built = createMiKoMiniModel(config);
-    if (built.status === "invalid-config") {
-      for (const problem of built.problems) {
-        problems.push(`${config.id}: ${problem}`);
+    switch (config.kind) {
+      case "miko-mini": {
+        const built = createMiKoMiniModel(config);
+        if (built.status === "invalid-config") {
+          for (const problem of built.problems) {
+            problems.push(`${config.id}: ${problem}`);
+          }
+          continue;
+        }
+        models.set(config.id, built.model);
+        break;
       }
-      continue;
+      case "generic-chain": {
+        // Registry selection: the config names the solver, the registry
+        // builds the model around it (ADR 0008).
+        const built = createGenericChainModel(config);
+        if (built.status === "invalid-config") {
+          for (const problem of built.problems) {
+            problems.push(`${config.id}: ${problem}`);
+          }
+          continue;
+        }
+        models.set(config.id, built.model);
+        break;
+      }
+      default: {
+        const unknown = config as { kind: string; id: string };
+        problems.push(`unsupported model kind "${String(unknown.kind)}" for id "${unknown.id}"`);
+      }
     }
-    models.set(config.id, built.model);
   }
 
   if (problems.length > 0) return { status: "invalid-config", problems };
