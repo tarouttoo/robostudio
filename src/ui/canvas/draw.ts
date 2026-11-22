@@ -136,9 +136,10 @@ function drawSegment(
     drawCross(ctx, project(transform, plane, segment.target));
     return;
   }
+  const ends = segmentEnds(segment);
   const points =
     segment.kind === "line"
-      ? [segmentEnds(segment).start, segmentEnds(segment).end]
+      ? [ends.start, ends.end]
       : Array.from({ length: ARC_SAMPLES + 1 }, (_, i) => arcPointAt(segment, i / ARC_SAMPLES));
   ctx.beginPath();
   for (const [i, world] of points.entries()) {
@@ -147,7 +148,6 @@ function drawSegment(
     else ctx.lineTo(px.x, px.y);
   }
   ctx.stroke();
-  const ends = segmentEnds(segment);
   drawEndpoint(ctx, project(transform, plane, ends.start));
   drawEndpoint(ctx, project(transform, plane, ends.end));
 }

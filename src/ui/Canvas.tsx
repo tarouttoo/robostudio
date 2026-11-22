@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from "react";
 
 import { vec2, type Segment, type Vec2, type Vec3, type WorkingPlane } from "../core";
 import { drawScene } from "./canvas/draw";
@@ -40,7 +40,13 @@ export function Canvas(props: CanvasProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewport = useElementViewport(containerRef);
-  const transform: CanvasTransform | null = viewport ? makeCanvasTransform(viewport) : null;
+  // The transform derives only from the viewport, so memoizing on the
+  // measurement keeps its identity stable across unrelated renders —
+  // the paint effect below then fires only on a real scene change.
+  const transform: CanvasTransform | null = useMemo(
+    () => (viewport ? makeCanvasTransform(viewport) : null),
+    [viewport],
+  );
 
   // Repaint whenever the transform or any scene input changes.
   useEffect(() => {
