@@ -16,6 +16,7 @@
 
 import { CoreError } from "./errors";
 import {
+  assertFinitePoint,
   assertPositiveFeed,
   type ArcDirection,
   type ArcSegment,
@@ -144,6 +145,9 @@ export function arcFromCenter(spec: {
   readonly feed: Feed;
 }): ArcSegment {
   assertPositiveFeed(spec.feed, "arc");
+  assertFinitePoint(spec.start, "arc start");
+  assertFinitePoint(spec.end, "arc end");
+  assertFinitePoint(spec.center, "arc center");
   const s = planeCoords(spec.plane, spec.start);
   const e = planeCoords(spec.plane, spec.end);
   const c = planeCoords(spec.plane, spec.center);
@@ -192,6 +196,8 @@ export function arcFromRadius(spec: {
   readonly feed: Feed;
 }): ArcSegment {
   assertPositiveFeed(spec.feed, "arc");
+  assertFinitePoint(spec.start, "arc start");
+  assertFinitePoint(spec.end, "arc end");
   if (!(Number.isFinite(spec.radiusMm) && spec.radiusMm > 0)) {
     throw new CoreError(
       "InvalidArcRadius",

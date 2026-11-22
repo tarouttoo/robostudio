@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { arcFromCenter } from "./arc";
 import { discretizeTrajectory } from "./discretize";
-import { line, point, trajectory } from "./trajectory";
+import { CoreError } from "./errors";
+import { line, point, trajectory, type Segment } from "./trajectory";
 import { distance, vec3 } from "./vec";
 
 /** Cumulative lengths never decrease along the path. */
@@ -276,5 +277,43 @@ describe("edge cases", () => {
     expect(path.samples).toHaveLength(21);
     expect(path.totalLengthMm).toBeCloseTo(10, 10);
     expectMonotonicLengths(path.samples);
+  });
+});
+
+describe("non-finite geometry defense", () => {
+  /** Samples are built from validated Segments; these literals bypass the
+   * builders to pin the stage's own defense against NaN/Infinity inputs. */
+  function literalSegment(seg: Segment, home = vec3(0, 0, 0)): () => unknown {
+    return () => discretizeTrajectory(trajectory(home, [seg]));
+  }
+
+  it("rejects a non-finite home with a named error", () => {
+    const seg = line({ start: vec3(1, 0, 0), end: vec3(2, 0, 0), feed: 20 });
+    expect(literalSegment(seg, vec3(Number.NaN, 0, 0))).toThrow(CoreError);
+    expect(literalSegment(seg, vec3(Number.NaN, 0, 0))).toThrow(/finite/);
+  });
+
+  it("rejects a line ending at Infinity instead of sampling forever", () => {
+    // n = ceil(∞ / step) = ∞: without the guard the sampler would push
+    // samples until the heap dies.
+    const seg: Segment = {
+      kind: "line",
+      start: vec3(0, 0, 0),
+      end: vec3(Number.POSITIVE_INFINITY, 0, 0),
+      feed: 20,
+    };
+    expect(literalSegment(seg)).toThrow(CoreError);
+    expect(literalSegment(seg)).toThrow(/non-finite geometry/);
+  });
+
+  it("rejects a point with a NaN target instead of dropping it silently", () => {
+    // A NaN hop would otherwise poison the cumulative length of every
+    // later sample with no error at all.
+    const seg: Segment = {
+      kind: "point",
+      target: vec3(Number.NaN, 0, 0),
+      feed: 20,
+    };
+    expect(literalSegment(seg)).toThrow(CoreError);
   });
 });

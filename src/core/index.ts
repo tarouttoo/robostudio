@@ -24,6 +24,7 @@ export {
 export type { Vec2, Vec3 } from "./vec";
 export { add, distance, length, lerp, scale, sub, vec2, vec3 } from "./vec";
 export {
+  assertFinitePoint,
   assertPositiveFeed,
   line,
   point,

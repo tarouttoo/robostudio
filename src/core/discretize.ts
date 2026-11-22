@@ -23,10 +23,15 @@
  *   within the merge distance).
  * - Every sample carries the Feed (mm/s) and index of the Segment being
  *   traversed; a merged Point changes no geometry and emits no sample.
+ * - Non-finite geometry (a NaN or infinite Home, target, or Segment
+ *   coordinate) is rejected with an `InvalidCoordinate` `CoreError`:
+ *   sampling it would drop the Segment silently (NaN length) or never
+ *   terminate (infinite length).
  */
 
 import { arcLengthMm, arcPointAt } from "./arc";
-import type { Feed, Trajectory } from "./trajectory";
+import { CoreError } from "./errors";
+import { assertFinitePoint, type Feed, type Trajectory } from "./trajectory";
 import { distance, lerp, type Vec3 } from "./vec";
 
 /** Default maximum spacing between consecutive samples, in mm. */
@@ -82,6 +87,7 @@ export function discretizeTrajectory(
   if (!(Number.isFinite(mergeDistanceMm) && mergeDistanceMm >= 0)) {
     throw new RangeError(`mergeDistanceMm must be a non-negative number of mm, got ${mergeDistanceMm}`);
   }
+  assertFinitePoint(traj.home, "trajectory home");
 
   const samples: PathSample[] = [];
   const emit = (position: Vec3, pathLengthMm: number, feed: Feed, segmentIndex: number): void => {
@@ -94,6 +100,12 @@ export function discretizeTrajectory(
   traj.segments.forEach((seg, index) => {
     if (seg.kind === "point") {
       const hop = distance(pen, seg.target);
+      if (!Number.isFinite(hop)) {
+        throw new CoreError(
+          "InvalidCoordinate",
+          `segment ${index} (point) has a non-finite target (${seg.target.x}, ${seg.target.y}, ${seg.target.z})`,
+        );
+      }
       if (hop > mergeDistanceMm) {
         // Transit: keep the start pose when it is not on file yet, then
         // arrive at the target.
@@ -109,6 +121,12 @@ export function discretizeTrajectory(
     }
 
     const hop = distance(pen, seg.start);
+    if (!Number.isFinite(hop)) {
+      throw new CoreError(
+        "InvalidCoordinate",
+        `segment ${index} (${seg.kind}) starts at a non-finite position`,
+      );
+    }
     const joined = hop <= mergeDistanceMm;
     if (!joined && samples.length === 0) {
       // Approach transit from Home: keep the start pose first.
@@ -117,6 +135,12 @@ export function discretizeTrajectory(
     if (!joined) base += hop; // the transit counts at full distance
     const lengthMm =
       seg.kind === "line" ? distance(seg.start, seg.end) : arcLengthMm(seg);
+    if (!Number.isFinite(lengthMm)) {
+      throw new CoreError(
+        "InvalidCoordinate",
+        `segment ${index} (${seg.kind}) has non-finite geometry (length ${lengthMm})`,
+      );
+    }
     const n = Math.max(1, Math.ceil(lengthMm / maxStepMm));
     for (let i = 0; i <= n; i++) {
       const f = i / n;

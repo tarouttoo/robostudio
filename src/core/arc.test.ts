@@ -161,6 +161,23 @@ describe("arc from center", () => {
       ),
     ).toBe("ArcOffPlane");
   });
+
+  it("rejects non-finite coordinates with a named error", () => {
+    const spec = {
+      plane: "XY" as const,
+      start: vec3(10, 0, 0),
+      end: vec3(0, 10, 0),
+      center: vec3(0, 0, 0),
+      direction: "CCW" as const,
+      feed: 20,
+    };
+    expect(errorTagOf(() => arcFromCenter({ ...spec, start: vec3(Number.NaN, 0, 0) }))).toBe(
+      "InvalidCoordinate",
+    );
+    expect(errorTagOf(() => arcFromCenter({ ...spec, center: vec3(Number.NaN, 0, 0) }))).toBe(
+      "InvalidCoordinate",
+    );
+  });
 });
 
 describe("arc from radius", () => {
@@ -289,6 +306,21 @@ describe("arc from radius", () => {
         }),
       ),
     ).toBe("ArcOffPlane");
+  });
+
+  it("rejects non-finite coordinates with a named error", () => {
+    expect(
+      errorTagOf(() =>
+        arcFromRadius({
+          plane: "XY",
+          start: vec3(1, 0, 0),
+          end: vec3(Number.POSITIVE_INFINITY, 1, 0),
+          radiusMm: 1,
+          direction: "CCW",
+          feed: 20,
+        }),
+      ),
+    ).toBe("InvalidCoordinate");
   });
 });
 

@@ -32,6 +32,15 @@ describe("line segment", () => {
       "InvalidFeed",
     );
   });
+
+  it("rejects non-finite coordinates with a named error", () => {
+    expect(errorTagOf(() => line({ start: vec3(Number.NaN, 0, 0), end: vec3(1, 0, 0), feed: 20 }))).toBe(
+      "InvalidCoordinate",
+    );
+    expect(errorTagOf(() => line({ start: vec3(0, 0, 0), end: vec3(1, Infinity, 0), feed: 20 }))).toBe(
+      "InvalidCoordinate",
+    );
+  });
 });
 
 describe("point segment", () => {
@@ -44,6 +53,12 @@ describe("point segment", () => {
 
   it("rejects a non-positive feed with a named error", () => {
     expect(errorTagOf(() => point({ target: vec3(1, 2, 3), feed: 0 }))).toBe("InvalidFeed");
+  });
+
+  it("rejects a non-finite target with a named error", () => {
+    expect(errorTagOf(() => point({ target: vec3(1, Number.NaN, 3), feed: 15 }))).toBe(
+      "InvalidCoordinate",
+    );
   });
 });
 

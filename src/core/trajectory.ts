@@ -101,12 +101,15 @@ export function line(spec: {
   readonly end: Vec3;
   readonly feed: Feed;
 }): LineSegment {
+  assertFinitePoint(spec.start, "line start");
+  assertFinitePoint(spec.end, "line end");
   assertPositiveFeed(spec.feed, "line");
   return { kind: "line", start: spec.start, end: spec.end, feed: spec.feed };
 }
 
 /** Builds a Point Segment (pen move without drawn geometry). */
 export function point(spec: { readonly target: Vec3; readonly feed: Feed }): PointSegment {
+  assertFinitePoint(spec.target, "point target");
   assertPositiveFeed(spec.feed, "point");
   return { kind: "point", target: spec.target, feed: spec.feed };
 }
@@ -138,5 +141,20 @@ export function segmentEnds(seg: Segment): { readonly start: Vec3; readonly end:
 export function assertPositiveFeed(feed: Feed, what: string): void {
   if (!(Number.isFinite(feed) && feed > 0)) {
     throw new CoreError("InvalidFeed", `${what} feed must be a positive number of mm/s, got ${feed}`);
+  }
+}
+
+/**
+ * Validates that every coordinate of a point is a finite number of mm.
+ * A NaN or infinite position would poison discretization silently: a
+ * non-finite segment length makes the sampler drop the Segment (NaN)
+ * or sample it forever (Infinity).
+ */
+export function assertFinitePoint(p: Vec3, what: string): void {
+  if (!(Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))) {
+    throw new CoreError(
+      "InvalidCoordinate",
+      `${what} must be a finite position in mm, got (${p.x}, ${p.y}, ${p.z})`,
+    );
   }
 }

@@ -11,6 +11,7 @@
 export type CoreErrorTag =
   | "InvalidFeed"
   | "InvalidArcRadius"
+  | "InvalidCoordinate"
   | "ArcRadiusTooSmall"
   | "ArcAmbiguousCenter"
   | "ArcCenterOffCircle"
