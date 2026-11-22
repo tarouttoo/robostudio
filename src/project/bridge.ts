@@ -9,11 +9,15 @@
 
 import type { ProjectContent } from "./file";
 import type { ProjectErrorTag } from "./errors";
+import type { CoreErrorTag } from "../core";
 
 /** An error reported across the bridge: a stable tag plus a readable message. */
 export interface BridgeError {
-  /** Stable discriminant (see `ProjectErrorTag`, or `IoFailed` for file I/O faults). */
-  readonly tag: ProjectErrorTag | "IoFailed";
+  /**
+   * Stable discriminant: a project tag, a core tag (parsed Segments are
+   * re-validated by the core), or `IoFailed` for file I/O faults.
+   */
+  readonly tag: ProjectErrorTag | CoreErrorTag | "IoFailed";
   /** Human-readable message, safe to show to the operator. */
   readonly message: string;
 }

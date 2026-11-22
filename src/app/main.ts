@@ -1,10 +1,41 @@
 import { join } from "node:path";
 
 import { APP_NAME } from "../core/version";
-import { BrowserWindow, app } from "electron";
+import { openProjectFile, saveProjectFile, type ProjectDialogs } from "./project-ipc";
+import { BrowserWindow, app, dialog, ipcMain } from "electron";
 
 /** URL of the Vite dev server; set by `npm run dev`, absent in production. */
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+
+/** Whether the Project File IPC handlers are registered (once per app). */
+let projectIpcRegistered = false;
+
+/**
+ * Registers the Project File IPC handlers: the save/open dialogs and
+ * the file system access run here, in the main process — the sandboxed
+ * renderer only ever sees the result records (ADR 0003). Registered
+ * once; later windows share the same channels.
+ */
+function registerProjectIpc(window: BrowserWindow): void {
+  if (projectIpcRegistered) return;
+  projectIpcRegistered = true;
+  const dialogs: ProjectDialogs = {
+    showSave: () =>
+      dialog.showSaveDialog(window, {
+        title: "Сохранить Файл проекта",
+        defaultPath: "project.json",
+        filters: [{ name: "Файл проекта", extensions: ["json"] }],
+      }),
+    showOpen: () =>
+      dialog.showOpenDialog(window, {
+        title: "Открыть Файл проекта",
+        filters: [{ name: "Файл проекта", extensions: ["json"] }],
+        properties: ["openFile"],
+      }),
+  };
+  ipcMain.handle("project:save", (_event, json: string) => saveProjectFile(dialogs, json));
+  ipcMain.handle("project:open", () => openProjectFile(dialogs));
+}
 
 /**
  * Creates the main application window with a sandboxed renderer: no
@@ -29,6 +60,7 @@ function createMainWindow(): BrowserWindow {
   } else {
     void window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
   }
+  registerProjectIpc(window);
   return window;
 }
 

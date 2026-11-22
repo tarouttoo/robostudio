@@ -111,4 +111,16 @@ describe("layer structure", () => {
       expect(violations).toEqual([]);
     });
   }
+
+  it("ui never imports node built-ins or electron: the sandboxed renderer does no file system access (ADR 0003)", () => {
+    const violations: string[] = [];
+    for (const file of layerSourceFiles("ui")) {
+      for (const specifier of importedSpecifiers(file)) {
+        if (specifier.startsWith("node:") || specifier === "electron") {
+          violations.push(`${file}: ui imports "${specifier}"`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });
