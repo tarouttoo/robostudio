@@ -33,6 +33,17 @@ jobs:
           node-version: 24
           cache: npm
 
+      # `cache: npm` above does not cover the Electron binary, which
+      # @electron/get stores in its own per-OS cache directory; without
+      # this every run re-downloads ~100 MB per runner.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
         run: npm ci
 
@@ -44,3 +55,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Exercise the production bundling path (renderer via Vite, main
+      # ESM + preload CJS via esbuild) so a broken build fails the PR
+      # instead of surfacing at release time.
+      - name: Build
+        run: npm run build
