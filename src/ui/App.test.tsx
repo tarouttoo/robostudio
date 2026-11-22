@@ -32,4 +32,11 @@ describe("app shell", () => {
     expect(html).toMatch(/<input type="radio" name="plane"[^>]*checked[^>]*value="XY"/);
     expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="line"/);
   });
+
+  it("offers Project File save and open in the Файл проекта section", () => {
+    const html = renderToString(<App />);
+    expect(html).toContain("Файл проекта");
+    expect(html).toContain("Сохранить");
+    expect(html).toContain("Открыть");
+  });
 });

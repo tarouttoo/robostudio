@@ -1,13 +1,16 @@
 import { useReducer, useState } from "react";
 
 import { type Segment, type Vec2, type Vec3 } from "../core";
+import { serializeProject } from "../project";
 import { APP_NAME, APP_VERSION } from "../core/version";
+import { projectBridge } from "./bridge";
 import { Canvas } from "./Canvas";
 import {
   editorReducer,
   initialEditorState,
   mmSToMmMin,
   planeAxisLetters,
+  projectContentOf,
   type EditorTool,
 } from "./editor";
 
@@ -22,7 +25,37 @@ import {
 export function App() {
   const [state, dispatch] = useReducer(editorReducer, initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const letters = planeAxisLetters(state.plane);
+
+  /** Saves the drawing as a Project File through the main process. */
+  const handleSave = async (): Promise<void> => {
+    const bridge = projectBridge();
+    if (bridge === null) {
+      setProjectMessage("Сохранение недоступно: нет моста к основному процессу.");
+      return;
+    }
+    const json = serializeProject(projectContentOf(state));
+    const result = await bridge.saveProject(json);
+    if (result.kind === "saved") setProjectMessage(`Сохранено: ${result.path}`);
+    else if (result.kind === "canceled") setProjectMessage(null);
+    else setProjectMessage(`Не сохранено: ${result.error.message}`);
+  };
+
+  /** Opens a Project File through the main process and restores the drawing. */
+  const handleOpen = async (): Promise<void> => {
+    const bridge = projectBridge();
+    if (bridge === null) {
+      setProjectMessage("Открытие недоступно: нет моста к основному процессу.");
+      return;
+    }
+    const result = await bridge.openProject();
+    if (result.kind === "loaded") {
+      dispatch({ type: "loadProject", content: result.content });
+      setProjectMessage(`Открыт: ${result.path}`);
+    } else if (result.kind === "canceled") setProjectMessage(null);
+    else setProjectMessage(result.error.message);
+  };
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -110,6 +143,29 @@ export function App() {
               Очистить
             </button>
           </div>
+          <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <h2 style={{ fontSize: "1rem", margin: 0 }}>Файл проекта</h2>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" onClick={() => void handleSave()}>
+                Сохранить
+              </button>
+              <button type="button" onClick={() => void handleOpen()}>
+                Открыть
+              </button>
+            </div>
+            {projectMessage !== null && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.85rem",
+                  color: projectMessage.startsWith("Не сохранено") || projectMessage.includes("недоступно") ? "#b00" : "#555",
+                  wordBreak: "break-all",
+                }}
+              >
+                {projectMessage}
+              </p>
+            )}
+          </section>
           <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
             Правая кнопка мыши отменяет незавершённый Отрезок.
           </p>

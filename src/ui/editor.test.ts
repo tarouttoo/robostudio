@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { planeCoords } from "../core";
-import { vec2 } from "../core";
+import { line as coreLine, vec2, vec3 } from "../core";
+import { type ProjectContent } from "../project";
 import {
   DEFAULT_FEED_MM_MIN,
   editorReducer,
   initialEditorState,
   mmMinToMmS,
   mmSToMmMin,
+  projectContentOf,
   type EditorState,
 } from "./editor";
 
@@ -205,5 +207,48 @@ describe("editor state", () => {
     const b = drawLine(initialEditorState, 1, 2, 3, 4);
     expect(b).toEqual(a);
     expect(initialEditorState.segments).toHaveLength(0);
+  });
+});
+
+describe("Project File content", () => {
+  /** Builds a content with one Line, as the serializer would store it. */
+  function content(): ProjectContent {
+    return {
+      view: { plane: "XZ", fixedMm: 4, feedMmMin: 600 },
+      home: vec3(1, 4, 2),
+      segments: [coreLine({ start: vec3(0, 4, 0), end: vec3(10, 4, 0), feed: 10 })],
+    };
+  }
+
+  it("collects the drawing state from the editor: view settings, Home Point, Segments", () => {
+    let state = editorReducer(
+      { ...initialEditorState, plane: "XZ" as const, fixedMm: 4, feedMmMin: 600 },
+      { type: "setTool", tool: "home" },
+    );
+    state = click(state, 1, 2);
+    state = editorReducer(state, { type: "setTool", tool: "line" });
+    state = drawLine(state, 0, 0, 10, 0);
+    expect(projectContentOf(state)).toEqual(content());
+  });
+
+  it("loadProject restores the full drawing state and clears any pending draft", () => {
+    const drafted = click(initialEditorState, 99, 99);
+    const restored = editorReducer(drafted, { type: "loadProject", content: content() });
+    expect(restored.plane).toBe("XZ");
+    expect(restored.fixedMm).toBe(4);
+    expect(restored.feedMmMin).toBe(600);
+    expect(restored.home).toEqual(vec3(1, 4, 2));
+    expect(restored.segments).toEqual(content().segments);
+    expect(restored.draftStart).toBeNull();
+  });
+
+  it("loadProject replaces previous geometry and allows an unset Home Point", () => {
+    const drawn = drawLine(drawLine(initialEditorState, 0, 0, 5, 5), 5, 5, 10, 10);
+    const restored = editorReducer(drawn, {
+      type: "loadProject",
+      content: { view: { plane: "XY", fixedMm: 0, feedMmMin: 1200 }, home: null, segments: [] },
+    });
+    expect(restored.segments).toEqual([]);
+    expect(restored.home).toBeNull();
   });
 });
