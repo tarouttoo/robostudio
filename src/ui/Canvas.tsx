@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from "react";
 
 import { vec2, type Segment, type Vec2, type Vec3, type WorkingPlane } from "../core";
+import type { DraftPreview } from "./editor";
 import { drawScene } from "./canvas/draw";
 import {
   backingSize,
@@ -17,8 +18,8 @@ export interface CanvasProps {
   readonly segments: readonly Segment[];
   /** The Home Point, or null while unset. */
   readonly home: Vec3 | null;
-  /** Pending Line start in plane millimetres, or null. */
-  readonly draftStart: Vec2 | null;
+  /** The pending draft descriptor, or null when nothing is pending. */
+  readonly draft: DraftPreview | null;
   /** Cursor position in plane millimetres, or null when off-canvas. */
   readonly cursor: Vec2 | null;
   /** Called with plane millimetres when the operator clicks the canvas. */
@@ -57,10 +58,10 @@ export function Canvas(props: CanvasProps): JSX.Element {
       plane: props.plane,
       segments: props.segments,
       home: props.home,
-      draftStart: props.draftStart,
+      draft: props.draft,
       cursor: props.cursor,
     });
-  }, [transform, props.plane, props.segments, props.home, props.draftStart, props.cursor]);
+  }, [transform, props.plane, props.segments, props.home, props.draft, props.cursor]);
 
   /** Unprojects a pointer event to plane millimetres. */
   const planePointOf = (e: React.PointerEvent<HTMLCanvasElement>): Vec2 | null => {

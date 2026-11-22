@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+
+import { resolveCenterFromRadius, vec2, type Vec2 } from "../../core";
+import { arcPreviewPoints, drawScene, type CanvasScene } from "./draw";
+import { makeCanvasTransform, type Viewport } from "./transform";
+
+/** The chord every scenario below draws along: (0,0) → (8,0). */
+const START = vec2(0, 0);
+const END = vec2(8, 0);
+
+/** The CCW minor-arc center for the chord: 90° left of it. */
+const CCW_CENTER = resolveCenterFromRadius(START, END, 10, "CCW")!;
+/** The CW minor-arc center: mirrored below the chord. */
+const CW_CENTER = resolveCenterFromRadius(START, END, 10, "CW")!;
+
+/** Midpoint sample of a preview, for shape assertions. */
+function midPoint(points: readonly Vec2[]): Vec2 {
+  return points[Math.floor(points.length / 2)]!;
+}
+
+describe("arc preview points", () => {
+  it("spans the draft exactly: first point is the start, last the on-circle end of the cursor ray", () => {
+    const points = arcPreviewPoints({
+      center: CCW_CENTER,
+      radiusMm: 10,
+      start: START,
+      cursor: END,
+      direction: "CCW",
+    });
+    expect(points[0]).toEqual(START);
+    const last = points[points.length - 1]!;
+    // The cursor defines the angle; the end sits on the circle.
+    expect(last.x).toBeCloseTo(END.x, 12);
+    expect(last.y).toBeCloseTo(END.y, 12);
+  });
+
+  it("keeps every sample on the circle", () => {
+    const points = arcPreviewPoints({
+      center: CCW_CENTER,
+      radiusMm: 10,
+      start: START,
+      cursor: vec2(14, 3),
+      direction: "CCW",
+    });
+    for (const p of points) {
+      expect(Math.hypot(p.x - CCW_CENTER.x, p.y - CCW_CENTER.y)).toBeCloseTo(10, 9);
+    }
+  });
+
+  it("bends CW and CCW previews to opposite sides: direction is visible before the click", () => {
+    const ccw = arcPreviewPoints({ center: CCW_CENTER, radiusMm: 10, start: START, cursor: END, direction: "CCW" });
+    const cw = arcPreviewPoints({ center: CW_CENTER, radiusMm: 10, start: START, cursor: END, direction: "CW" });
+    const ccwMid = midPoint(ccw);
+    const cwMid = midPoint(cw);
+    // The CCW center lies above the chord, its arc bulges below it; CW mirrors.
+    expect(ccwMid.y).toBeLessThan(0);
+    expect(cwMid.y).toBeGreaterThan(0);
+  });
+
+  it("follows a moved cursor: the preview sweep tracks the cursor angle", () => {
+    const near = arcPreviewPoints({ center: CCW_CENTER, radiusMm: 10, start: START, cursor: END, direction: "CCW" });
+    const far = arcPreviewPoints({
+      center: CCW_CENTER,
+      radiusMm: 10,
+      start: START,
+      cursor: vec2(CCW_CENTER.x, CCW_CENTER.y - 10),
+      direction: "CCW",
+    });
+    // The second cursor sits at the circle's bottom: a larger CCW sweep.
+    expect(far.length).toBeGreaterThan(0);
+    expect(midPoint(far)).not.toEqual(midPoint(near));
+  });
+});
+
+describe("drawScene with arc drafts", () => {
+  // A pointermove always precedes a pointerdown, so right after the
+  // first Arc click the cursor is exactly on the fresh draft start —
+  // the scene painted then must not depend on a center being resolvable.
+  const sceneWith = (cursor: Vec2): Omit<CanvasScene, "transform"> => ({
+    plane: "XY",
+    segments: [],
+    home: null,
+    draft: { kind: "arcRadius", start: START, radiusMm: 10, direction: "CCW" },
+    cursor,
+  });
+
+  it("tolerates a cursor on the draft start: no center is resolvable yet, so no preview", () => {
+    expect(() => drawScene(stubCtx(), { ...sceneWith(START), transform })).not.toThrow();
+  });
+
+  it("tolerates a settled draft: a resolvable center paints the preview", () => {
+    expect(() => drawScene(stubCtx(), { ...sceneWith(END), transform })).not.toThrow();
+  });
+});
+
+/** The test viewport: 400×300 CSS pixels at DPR 1. */
+const viewport: Viewport = { widthPx: 400, heightPx: 300, devicePixelRatio: 1 };
+
+/** A transform over the test viewport, origin near the middle. */
+const transform = makeCanvasTransform(viewport);
+
+/**
+ * A do-nothing 2D context stub. The canvas API is a system boundary
+ * (node test environment, no real canvas); drawScene only strokes, so
+ * recording nothing is enough to exercise its control flow.
+ */
+function stubCtx(): CanvasRenderingContext2D {
+  const noop = (): void => {};
+  return {
+    setTransform: noop,
+    fillRect: noop,
+    beginPath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    arc: noop,
+    stroke: noop,
+    fill: noop,
+    setLineDash: noop,
+  } as unknown as CanvasRenderingContext2D;
+}
