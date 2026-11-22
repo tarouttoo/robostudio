@@ -37,11 +37,18 @@ const TAU = 2 * Math.PI;
 
 /**
  * The (u, v) in-plane coordinate axes and the fixed w axis of each
- * Working Plane. CCW/CW direction is defined in the (u, v) pair:
+ * Working Plane. CCW/CW direction is defined in the (u, v) pair: CCW
+ * appears counter-clockwise viewed from the (u × v) side, which per
+ * plane is:
  *
- * - XY: (x, y), z fixed — viewed from +z, standard math orientation.
- * - XZ: (x, z), y fixed.
- * - YZ: (y, z), x fixed.
+ * - XY: (x, y), z fixed — viewed from +z (standard math orientation).
+ * - XZ: (x, z), y fixed — viewed from −y (x right, z up, as drawn).
+ * - YZ: (y, z), x fixed — viewed from +x.
+ *
+ * Note the XZ sign: ISO G18 defines the plane as ZX viewed from +y, so
+ * a future G-code bridge must flip the direction when mapping to or
+ * from G18. That mapping belongs to the exporter/importer, not to the
+ * stored canonical form (ADR 0005).
  */
 export const planeAxes: Record<WorkingPlane, { readonly u: 0 | 1 | 2; readonly v: 0 | 1 | 2; readonly w: 0 | 1 | 2 }> = {
   XY: { u: 0, v: 1, w: 2 },
@@ -242,11 +249,6 @@ export function arcPointAt(arc: ArcSegment, f: number): Vec3 {
 /** Analytic arc length: radius times sweep magnitude, in millimetres. */
 export function arcLengthMm(arc: ArcSegment): number {
   return Math.abs(arc.sweepRad) * arc.radiusMm;
-}
-
-/** Distance the arc covers between fractions f0 and f1 of its sweep. */
-export function arcSpanMm(arc: ArcSegment, f0: number, f1: number): number {
-  return Math.abs((f1 - f0) * arc.sweepRad) * arc.radiusMm;
 }
 
 /**

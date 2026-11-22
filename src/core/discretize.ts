@@ -11,6 +11,9 @@
  *   sample is dropped and the residual offset is folded into the join
  *   (treated as zero path length). This covers exact duplicates and
  *   float dust from consecutive drawing.
+ * - A Segment of zero geometric length contributes at most one sample
+ *   (its single position): never two, so consecutive samples always
+ *   advance the path — a joined zero-length Segment contributes none.
  * - `pathLengthMm` is cumulative pen travel from the Home Point:
  *   analytic along each Segment's geometry, Euclidean across transits.
  *   Transits — the approach from Home, gaps between Segments, and Point
@@ -117,8 +120,10 @@ export function discretizeTrajectory(
     const n = Math.max(1, Math.ceil(lengthMm / maxStepMm));
     for (let i = 0; i <= n; i++) {
       const f = i / n;
-      // A joined start sample duplicates the previous segment's end.
+      // A joined start sample duplicates the previous segment's end;
+      // a zero-length Segment's end sample duplicates its own start.
       if (i === 0 && joined && samples.length > 0) continue;
+      if (i > 0 && lengthMm === 0) continue;
       const position = seg.kind === "line" ? lerp(seg.start, seg.end, f) : arcPointAt(seg, f);
       emit(position, base + f * lengthMm, seg.feed, index);
     }

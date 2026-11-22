@@ -231,4 +231,28 @@ describe("edge cases", () => {
     expect(path.totalLengthMm).toBe(0);
     expect(path.home).toEqual(vec3(1, 2, 3));
   });
+
+  it("collapses a zero-length Segment to a single arrival sample", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(5, 0, 0), end: vec3(5, 0, 0), feed: 20 }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // Home, then the arrival at the degenerate Segment's position.
+    expect(path.samples).toHaveLength(2);
+    expect(path.samples[0]?.position).toEqual(vec3(0, 0, 0));
+    expect(path.samples[1]?.position).toEqual(vec3(5, 0, 0));
+    expect(path.samples[1]?.pathLengthMm).toBeCloseTo(5, 10);
+    expect(path.totalLengthMm).toBeCloseTo(5, 10);
+  });
+
+  it("emits no sample for a zero-length Segment joined at the previous end", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 20 }),
+      line({ start: vec3(10, 0, 0), end: vec3(10, 0, 0), feed: 20 }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    expect(path.samples).toHaveLength(21);
+    expect(path.totalLengthMm).toBeCloseTo(10, 10);
+    expectMonotonicLengths(path.samples);
+  });
 });
