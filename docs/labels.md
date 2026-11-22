@@ -1,7 +1,7 @@
 # Labels
 
 The pipeline is driven entirely by labels. There are two kinds, matching the
-glossary in [CONTEXT.md](../CONTEXT.md):
+glossary in [GLOSSARY.md](../GLOSSARY.md):
 
 - **Trigger labels** — you add these to drive the pipeline. Adding one starts
   the matching workflow; the workflow removes the label when the run begins.

@@ -4,7 +4,7 @@ Copyright (c) 2026 Matt Pocock (pipeline files ported from
 mattpocock/sandcastle, commit a53e227250fb51df0ad54155b85fecc1c090c937)
 
 Copyright (c) 2026 tarouttoo (template scaffolding and adaptations:
-README, LICENSE, AGENTS.md, CONTEXT.md, package.json, tsconfig.json,
+README, LICENSE, AGENTS.md, GLOSSARY.md, package.json, tsconfig.json,
 .github/workflows runner swap)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

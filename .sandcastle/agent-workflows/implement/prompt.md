@@ -20,7 +20,7 @@ Ticket exists and what it is part of. Implement only issue #{{ISSUE_NUMBER}}
 
 Read the project's domain and architecture docs before changing code:
 
-- `CONTEXT.md`
+- `GLOSSARY.md`
 - `docs/adr/` if relevant
 - `.sandcastle/CODING_STANDARDS.md`
 

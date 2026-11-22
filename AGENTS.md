@@ -9,7 +9,7 @@ humans and coding agents edit both the product code and the pipeline code.
 
 ## Navigation
 
-- **Naming or domain questions** — read `CONTEXT.md` (domain glossary) first.
+- **Naming or domain questions** — read `GLOSSARY.md` (domain glossary) first.
   UI text is Russian, code and docs are English; the glossary maps the two
   and forbids synonyms.
 - **Changing pipeline behaviour** — check `docs/adr/` for prior decisions;
@@ -28,3 +28,17 @@ humans and coding agents edit both the product code and the pipeline code.
   verbatim port of upstream (modulo the documented deviations in
   `README.md`). Verify against upstream before restructuring.
 - Before finishing: `npm run typecheck` and `npm test` must pass.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues via the `gh` CLI; external PRs are triaged as requests too. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Pipeline vocabulary: `agent:explore` → `agent:blocked` → `agent:implement` → `ready-for-human`; `wontfix` is applied by closing. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
