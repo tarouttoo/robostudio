@@ -19,6 +19,7 @@ import {
   assertPositiveFeed,
   type ArcDirection,
   type ArcSegment,
+  type Feed,
   type WorkingPlane,
 } from "./trajectory";
 import { vec2, vec3, type Vec2, type Vec3 } from "./vec";
@@ -80,6 +81,12 @@ export function resolveCenterFromRadius(
   const dx = end2.x - start2.x;
   const dy = end2.y - start2.y;
   const chord = Math.hypot(dx, dy);
+  if (chord <= CHORD_EPS_MM) {
+    throw new CoreError(
+      "ArcAmbiguousCenter",
+      `coincident endpoints ${fmt(start2.x, start2.y)} give no unique center for radius ${radiusMm}`,
+    );
+  }
   if (chord > 2 * radiusMm + CHORD_EPS_MM) return null;
   // Left normal of the chord; the right normal is its negation.
   const nx = -dy / chord;
@@ -122,7 +129,7 @@ export function arcFromCenter(spec: {
   readonly end: Vec3;
   readonly center: Vec3;
   readonly direction: ArcDirection;
-  readonly feed: number;
+  readonly feed: Feed;
 }): ArcSegment {
   assertPositiveFeed(spec.feed, "arc");
   const s = planeCoords(spec.plane, spec.start);
@@ -170,7 +177,7 @@ export function arcFromRadius(spec: {
   readonly end: Vec3;
   readonly radiusMm: number;
   readonly direction: ArcDirection;
-  readonly feed: number;
+  readonly feed: Feed;
 }): ArcSegment {
   assertPositiveFeed(spec.feed, "arc");
   if (!(Number.isFinite(spec.radiusMm) && spec.radiusMm > 0)) {
