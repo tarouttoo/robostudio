@@ -32,4 +32,12 @@ describe("app shell", () => {
     expect(html).toMatch(/<input type="radio" name="plane"[^>]*checked[^>]*value="XY"/);
     expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="line"/);
   });
+
+  it("renders the Reachability map legend", () => {
+    const html = renderToString(<App />).replace(/<!-- -->/g, "");
+    expect(html).toContain("Достижимость");
+    expect(html).toContain("достижимо");
+    expect(html).toContain("недостижимо");
+    expect(html).toContain("предел шарнира");
+  });
 });

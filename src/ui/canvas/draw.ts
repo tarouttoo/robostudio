@@ -17,6 +17,14 @@ import {
   type Vec3,
   type WorkingPlane,
 } from "../../core";
+import {
+  REACHABILITY_COLORS,
+  type ReachabilitySampler,
+} from "./reachability";
+import type {
+  PointReachability,
+  ReachabilityViolation,
+} from "../../kinematics/reachability";
 import { gridLinesMm } from "./grid";
 import { worldBounds, type CanvasTransform } from "./transform";
 
@@ -34,6 +42,14 @@ export interface CanvasScene {
   readonly draftStart: Vec2 | null;
   /** Cursor position in plane millimetres, or null when off-canvas. */
   readonly cursor: Vec2 | null;
+  /** The live Reachability map painted behind the geometry. */
+  readonly reachability: ReachabilitySampler;
+  /** Per-Segment Reachability violations, aligned with `segments` by index. */
+  readonly violations: readonly (ReachabilityViolation | null)[];
+  /** Violation of the pending draft preview, or null when none. */
+  readonly draftViolation: ReachabilityViolation | null;
+  /** Reachability of the Home Point, or null while unset. */
+  readonly homeStatus: PointReachability | null;
 }
 
 /** Stroke and fill colours of the canvas scene. */
@@ -46,6 +62,12 @@ const COLORS = {
   home: "#1a7f37",
   draft: "#c46a00",
 } as const;
+
+/**
+ * The colour a Reachability violation is flagged with, on the canvas
+ * (violating Segments, draft preview, Home Point) and in the UI lists.
+ */
+export const VIOLATION_COLOR = "#c62b2b";
 
 /** Half the size of an endpoint marker, in CSS pixels. */
 const ENDPOINT_HALF_PX = 2.5;
@@ -62,17 +84,81 @@ const ARC_SAMPLES = 48;
  * redraw after a resize or DPR change always matches the live element.
  */
 export function drawScene(ctx: CanvasRenderingContext2D, scene: CanvasScene): void {
-  const { transform, plane, segments, home, draftStart, cursor } = scene;
+  const { transform, plane, segments, home, draftStart, cursor, reachability, violations, draftViolation, homeStatus } = scene;
   const viewport = transform.viewport;
   const dpr = viewport.devicePixelRatio;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = COLORS.background;
   ctx.fillRect(0, 0, viewport.widthPx, viewport.heightPx);
 
+  drawReachability(ctx, transform, reachability);
   drawGrid(ctx, transform);
-  for (const segment of segments) drawSegment(ctx, transform, plane, segment);
-  if (home !== null) drawHome(ctx, transform, plane, home);
-  drawDraft(ctx, transform, draftStart, cursor);
+  for (const [i, segment] of segments.entries()) {
+    const violation = violations[i] ?? null;
+    drawSegment(ctx, transform, plane, segment, violation !== null);
+  }
+  if (home !== null) drawHome(ctx, transform, plane, home, homeStatus === "ok");
+  drawDraft(ctx, transform, draftStart, cursor, draftViolation !== null);
+}
+
+/** One painted map cell: its screen rectangle (x, y, width, height). */
+type CellRect = [number, number, number, number];
+
+/**
+ * Paints the Reachability map: one rectangle per lattice cell of the
+ * sampler that intersects the visible world range, coloured by its
+ * status. Cell statuses come from the sampler's cache, so a repaint
+ * never re-runs inverse kinematics over sampled ground.
+ */
+function drawReachability(
+  ctx: CanvasRenderingContext2D,
+  transform: CanvasTransform,
+  reachability: ReachabilitySampler,
+): void {
+  const bounds = worldBounds(transform);
+  const cell = reachability.cellMm;
+  const blocked: CellRect[] = [];
+  const limited: CellRect[] = [];
+  const allowed: CellRect[] = [];
+  const rectsOf = (status: PointReachability): CellRect[] =>
+    status === "ok" ? allowed : status === "unreachable" ? blocked : limited;
+  // Cells strictly intersecting the visible range: the last index is
+  // the cell containing the largest visible coordinate, so a boundary
+  // that lands exactly on a cell edge does not paint the empty cell
+  // beyond it.
+  const lastI = Math.ceil(bounds.maxU / cell) - 1;
+  const lastJ = Math.ceil(bounds.maxV / cell) - 1;
+  for (let j = Math.floor(bounds.minV / cell); j <= lastJ; j++) {
+    for (let i = Math.floor(bounds.minU / cell); i <= lastI; i++) {
+      const x0 = Math.round(transform.toScreen(vec2(i * cell, 0)).x);
+      const x1 = Math.round(transform.toScreen(vec2((i + 1) * cell, 0)).x);
+      const yTop = Math.round(transform.toScreen(vec2(0, (j + 1) * cell)).y);
+      const yBottom = Math.round(transform.toScreen(vec2(0, j * cell)).y);
+      rectsOf(reachability.statusAt((i + 0.5) * cell, (j + 0.5) * cell)).push([
+        x0,
+        yTop,
+        x1 - x0 + 1,
+        yBottom - yTop + 1,
+      ]);
+    }
+  }
+  // Paint status by status (one fillStyle change each) and overdraw
+  // each cell by one pixel so neighbours leave no seams.
+  const layers: readonly {
+    readonly status: PointReachability;
+    readonly rects: readonly CellRect[];
+  }[] = [
+    { status: "unreachable", rects: blocked },
+    { status: "angle-limit", rects: limited },
+    { status: "ok", rects: allowed },
+  ];
+  for (const { status, rects } of layers) {
+    if (rects.length === 0) continue;
+    ctx.fillStyle = REACHABILITY_COLORS[status];
+    ctx.beginPath();
+    for (const [x, y, w, h] of rects) ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
 }
 
 /** Draws the millimetre grid: minor and major lines plus the axes. */
@@ -128,9 +214,11 @@ function drawSegment(
   transform: CanvasTransform,
   plane: WorkingPlane,
   segment: Segment,
+  violating: boolean,
 ): void {
-  ctx.strokeStyle = COLORS.segment;
-  ctx.fillStyle = COLORS.segment;
+  const color = violating ? VIOLATION_COLOR : COLORS.segment;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 2;
   if (segment.kind === "point") {
     drawCross(ctx, project(transform, plane, segment.target));
@@ -158,10 +246,12 @@ function drawHome(
   transform: CanvasTransform,
   plane: WorkingPlane,
   home: Vec3,
+  reachable: boolean,
 ): void {
   const px = project(transform, plane, home);
-  ctx.strokeStyle = COLORS.home;
-  ctx.fillStyle = COLORS.home;
+  const color = reachable ? COLORS.home : VIOLATION_COLOR;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.arc(px.x, px.y, HOME_RADIUS_PX, 0, 2 * Math.PI);
@@ -180,11 +270,13 @@ function drawDraft(
   transform: CanvasTransform,
   draftStart: Vec2 | null,
   cursor: Vec2 | null,
+  violating: boolean,
 ): void {
   if (draftStart === null) return;
   const start = transform.toScreen(draftStart);
-  ctx.strokeStyle = COLORS.draft;
-  ctx.fillStyle = COLORS.draft;
+  const color = violating ? VIOLATION_COLOR : COLORS.draft;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 1.5;
   if (cursor !== null) {
     const px = transform.toScreen(cursor);
