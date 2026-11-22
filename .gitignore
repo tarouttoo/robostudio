@@ -1,0 +1,14 @@
+node_modules/
+tmp/
+.env
+
+# build artifacts
+dist/
+out/
+coverage/
+output/
+*.tsbuildinfo
+
+# OS noise
+.DS_Store
+Thumbs.db
