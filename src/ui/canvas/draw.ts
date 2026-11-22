@@ -10,8 +10,11 @@
 import {
   arcPointAt,
   planeCoords,
+  resolveCenterFromRadius,
   segmentEnds,
+  sweepRad,
   vec2,
+  type ArcDirection,
   type Segment,
   type Vec2,
   type Vec3,
@@ -19,6 +22,7 @@ import {
 } from "../../core";
 import { gridLinesMm } from "./grid";
 import { worldBounds, type CanvasTransform } from "./transform";
+import type { DraftPreview } from "../editor";
 
 /** Everything the canvas draws, already in app state. */
 export interface CanvasScene {
@@ -30,8 +34,8 @@ export interface CanvasScene {
   readonly segments: readonly Segment[];
   /** The Home Point, or null while unset. */
   readonly home: Vec3 | null;
-  /** Pending Line start in plane millimetres, or null. */
-  readonly draftStart: Vec2 | null;
+  /** The pending draft descriptor, or null when nothing is pending. */
+  readonly draft: DraftPreview | null;
   /** Cursor position in plane millimetres, or null when off-canvas. */
   readonly cursor: Vec2 | null;
 }
@@ -62,7 +66,7 @@ const ARC_SAMPLES = 48;
  * redraw after a resize or DPR change always matches the live element.
  */
 export function drawScene(ctx: CanvasRenderingContext2D, scene: CanvasScene): void {
-  const { transform, plane, segments, home, draftStart, cursor } = scene;
+  const { transform, plane, segments, home, draft, cursor } = scene;
   const viewport = transform.viewport;
   const dpr = viewport.devicePixelRatio;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -72,7 +76,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: CanvasScene): vo
   drawGrid(ctx, transform);
   for (const segment of segments) drawSegment(ctx, transform, plane, segment);
   if (home !== null) drawHome(ctx, transform, plane, home);
-  drawDraft(ctx, transform, draftStart, cursor);
+  drawDraft(ctx, transform, draft, cursor);
 }
 
 /** Draws the millimetre grid: minor and major lines plus the axes. */
@@ -174,30 +178,113 @@ function drawHome(
   ctx.stroke();
 }
 
-/** Draws the pending Line: start marker plus a dashed line to the cursor. */
+/**
+ * Draws the pending draft: the start marker, a dashed guide to the
+ * cursor, and — for an Arc draft — the preview Arc itself, so CW/CCW
+ * and the chosen R or center are visible before the committing click.
+ */
 function drawDraft(
   ctx: CanvasRenderingContext2D,
   transform: CanvasTransform,
-  draftStart: Vec2 | null,
+  draft: DraftPreview | null,
   cursor: Vec2 | null,
 ): void {
-  if (draftStart === null) return;
-  const start = transform.toScreen(draftStart);
+  if (draft === null) return;
+  const start = transform.toScreen(draft.start);
   ctx.strokeStyle = COLORS.draft;
   ctx.fillStyle = COLORS.draft;
   ctx.lineWidth = 1.5;
-  if (cursor !== null) {
-    const px = transform.toScreen(cursor);
-    ctx.setLineDash([6, 4]);
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(px.x, px.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
   ctx.beginPath();
   ctx.arc(start.x, start.y, 4, 0, 2 * Math.PI);
   ctx.stroke();
+  if (cursor === null) return;
+
+  if (draft.kind === "line") {
+    dashedPolyline(ctx, transform, [draft.start, cursor]);
+    return;
+  }
+  if (draft.kind === "arcRadius") {
+    // Guide chord, then the preview Arc when the radius resolves a center.
+    dashedPolyline(ctx, transform, [draft.start, cursor]);
+    const center = resolveCenterFromRadius(draft.start, cursor, draft.radiusMm, draft.direction);
+    if (center === null) return;
+    dashedPolyline(
+      ctx,
+      transform,
+      arcPreviewPoints({ center, radiusMm: draft.radiusMm, start: draft.start, cursor, direction: draft.direction }),
+    );
+    return;
+  }
+  // Center mode: guide to the center; once it exists, the full circle
+  // and the preview Arc around it.
+  if (draft.center === null) {
+    dashedPolyline(ctx, transform, [draft.start, cursor]);
+    return;
+  }
+  const centerPx = transform.toScreen(draft.center);
+  const radiusPx = Math.hypot(draft.start.x - draft.center.x, draft.start.y - draft.center.y) * transform.pxPerMm;
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  ctx.arc(centerPx.x, centerPx.y, radiusPx, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  dashedPolyline(ctx, transform, [draft.start, draft.center]);
+  dashedPolyline(
+    ctx,
+    transform,
+    arcPreviewPoints({
+      center: draft.center,
+      radiusMm: Math.hypot(draft.start.x - draft.center.x, draft.start.y - draft.center.y),
+      start: draft.start,
+      cursor,
+      direction: draft.direction,
+    }),
+  );
+}
+
+/** Strokes a dashed polyline through the given plane millimetre points. */
+function dashedPolyline(ctx: CanvasRenderingContext2D, transform: CanvasTransform, points: readonly Vec2[]): void {
+  if (points.length < 2) return;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  for (const [i, p] of points.entries()) {
+    const px = transform.toScreen(p);
+    if (i === 0) ctx.moveTo(px.x, px.y);
+    else ctx.lineTo(px.x, px.y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/**
+ * Preview samples of an Arc draft: from `start` to where the cursor's
+ * ray from `center` pierces the circle, sweeping CW or CCW. The cursor
+ * defines the end angle only — the preview radius is `radiusMm`, so the
+ * preview matches exactly what a click at that angle would commit.
+ * Pure: exported for the geometry tests that pin CW/CCW visibility.
+ */
+export function arcPreviewPoints(spec: {
+  readonly center: Vec2;
+  readonly radiusMm: number;
+  readonly start: Vec2;
+  readonly cursor: Vec2;
+  readonly direction: ArcDirection;
+}): Vec2[] {
+  const { center, radiusMm, start, cursor, direction } = spec;
+  const offset = Math.hypot(cursor.x - center.x, cursor.y - center.y);
+  const end =
+    offset <= 1e-12
+      ? start
+      : vec2(center.x + (radiusMm * (cursor.x - center.x)) / offset, center.y + (radiusMm * (cursor.y - center.y)) / offset);
+  const sweep = sweepRad(start, end, center, direction);
+  const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
+  return Array.from({ length: ARC_SAMPLES + 1 }, (_, i) => {
+    const f = i / ARC_SAMPLES;
+    if (f === 0) return start;
+    if (f === 1) return end;
+    const angle = startAngle + f * sweep;
+    return vec2(center.x + radiusMm * Math.cos(angle), center.y + radiusMm * Math.sin(angle));
+  });
 }
 
 /** Draws a small square at a Segment endpoint. */
