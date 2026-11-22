@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
  * - `motion` — Planner implementations: discretization → time-parameterized
  *   joint motion.
  * - `export` — the headless pipeline (validation stage chain) and
-   Exporters writing named outputs (Robot CSV, RViz CSV). May import
-   `core`, `kinematics`, and `motion` (ADR 0012).
+ *   Exporters writing named outputs (Robot CSV, RViz CSV). May import
+ *   `core`, `kinematics`, and `motion` (ADR 0012).
  * - `project` — the versioned Project File schema and (de)serialization.
  * - `app` — Electron main process: window lifecycle, preload, sandboxed
  *   renderer shell. Never imports `ui`.

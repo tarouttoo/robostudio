@@ -20,7 +20,16 @@ function defaultModel(): RobotModel {
 
 /** Reads a committed golden fixture, byte for byte. */
 function goldenFile(name: string): string {
-  return readFileSync(join(import.meta.dirname, "golden", name), "utf8");
+  const fixture = readFileSync(join(import.meta.dirname, "golden", name), "utf8");
+  if (fixture.includes("\r")) {
+    // The committed bytes are the contract (ADR 0006): a CR here means
+    // git rewrote the line endings on checkout — the `*.csv` rule in
+    // `.gitattributes` must apply to this working tree.
+    throw new Error(
+      `${name} carries CR bytes: the golden fixtures are byte-level contracts (ADR 0006, bare \\n endings) and must be checked out with LF endings — check .gitattributes`,
+    );
+  }
+  return fixture;
 }
 
 describe("golden fixtures (ADR 0006)", () => {
