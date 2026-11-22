@@ -12,6 +12,12 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", ".sandcastle/**/*.ts", "docs/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "src/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    ".sandcastle/**/*.ts",
+    "docs/**/*.ts"
+  ],
+  "exclude": ["node_modules", "src/ui"]
 }

@@ -20,13 +20,38 @@ child Tickets; the agent pipeline below implements them into draft PRs.
 
 ```sh
 npm ci
+npm run dev       # Vite dev server + Electron window (React renderer)
+npm run build     # renderer (vite) + main (esm) + preload (cjs) into dist/
 npm test          # vitest: pipeline tests + product unit tests
-npm run typecheck # tsc --noEmit
+npm run typecheck # tsc --noEmit for node/pipeline + renderer configs
+npm run lint      # oxlint (the TS compiler is v7 native; tsc-based linters
+                  # do not support it yet)
 ```
 
-Product code lives under `src/`; the agent pipeline code lives under
+### Layer structure
+
+Product code lives under `src/` in the layers fixed by ADR 0003 and
+guarded by `src/layers.test.ts`:
+
+```text
+src/
+├── core/        # math core shared by everything; zero runtime deps (ADR 0004)
+├── kinematics/  # RobotModel implementations: chains, limits, FK/IK
+├── motion/      # Planner implementations: discretization → Motion Plan
+├── export/      # Exporters: Robot CSV, RViz CSV (contracts, ADR 0006)
+├── project/     # versioned Project File schema + (de)serialization
+├── app/         # Electron main process: window lifecycle, preload bridge
+└── ui/          # React renderer (Russian UI text per GLOSSARY.md)
+```
+
+Dependencies point strictly downwards: `core` imports nothing; `ui`
+never imports `app` — the sandboxed renderer reaches the main process
+only through the preload bridge (ADR 0003).
+
+The agent pipeline code lives under
 `.sandcastle/` and `.github/workflows/` and is kept verbatim from the
-template it came from (see [Agent pipeline](#agent-pipeline)).
+template it came from (see [Agent pipeline](#agent-pipeline)); the
+product CI workflow `ci.yml` is the one addition there.
 
 ## Builds and releases
 

@@ -1,0 +1,7 @@
+{
+  "plugins": ["react", "react-hooks"],
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": ["dist", "out", "coverage", "output", "tmp", "node_modules", ".sandcastle", "docs"]
+}

@@ -3,19 +3,38 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/main/main.js",
   "scripts": {
+    "dev": "npm run build:main && npm run build:preload && concurrently -k -s first \"vite --strictPort\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "npm run build:renderer && npm run build:main && npm run build:preload",
+    "build:renderer": "vite build",
+    "build:main": "esbuild src/app/main.ts --bundle --platform=node --format=esm --external:electron --outfile=dist/main/main.js --sourcemap",
+    "build:preload": "esbuild src/app/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main/preload.cjs --sourcemap",
+    "lint": "oxlint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.renderer.json"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "^0.12.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^45.4.1",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.94.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "vitest": "^5.0.5",
+    "wait-on": "^9.0.3",
     "yaml": "^2.9.1"
   }
 }
