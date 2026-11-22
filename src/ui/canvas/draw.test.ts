@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveCenterFromRadius, vec2, type Vec2 } from "../../core";
-import { arcPreviewPoints } from "./draw";
+import { arcPreviewPoints, drawScene, type CanvasScene } from "./draw";
+import { makeCanvasTransform, type Viewport } from "./transform";
 
 /** The chord every scenario below draws along: (0,0) → (8,0). */
 const START = vec2(0, 0);
@@ -70,3 +71,50 @@ describe("arc preview points", () => {
     expect(midPoint(far)).not.toEqual(midPoint(near));
   });
 });
+
+describe("drawScene with arc drafts", () => {
+  // A pointermove always precedes a pointerdown, so right after the
+  // first Arc click the cursor is exactly on the fresh draft start —
+  // the scene painted then must not depend on a center being resolvable.
+  const sceneWith = (cursor: Vec2): Omit<CanvasScene, "transform"> => ({
+    plane: "XY",
+    segments: [],
+    home: null,
+    draft: { kind: "arcRadius", start: START, radiusMm: 10, direction: "CCW" },
+    cursor,
+  });
+
+  it("tolerates a cursor on the draft start: no center is resolvable yet, so no preview", () => {
+    expect(() => drawScene(stubCtx(), { ...sceneWith(START), transform })).not.toThrow();
+  });
+
+  it("tolerates a settled draft: a resolvable center paints the preview", () => {
+    expect(() => drawScene(stubCtx(), { ...sceneWith(END), transform })).not.toThrow();
+  });
+});
+
+/** The test viewport: 400×300 CSS pixels at DPR 1. */
+const viewport: Viewport = { widthPx: 400, heightPx: 300, devicePixelRatio: 1 };
+
+/** A transform over the test viewport, origin near the middle. */
+const transform = makeCanvasTransform(viewport);
+
+/**
+ * A do-nothing 2D context stub. The canvas API is a system boundary
+ * (node test environment, no real canvas); drawScene only strokes, so
+ * recording nothing is enough to exercise its control flow.
+ */
+function stubCtx(): CanvasRenderingContext2D {
+  const noop = (): void => {};
+  return {
+    setTransform: noop,
+    fillRect: noop,
+    beginPath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    arc: noop,
+    stroke: noop,
+    fill: noop,
+    setLineDash: noop,
+  } as unknown as CanvasRenderingContext2D;
+}

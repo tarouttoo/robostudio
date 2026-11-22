@@ -9,6 +9,7 @@
 
 import {
   arcPointAt,
+  CoreError,
   planeCoords,
   resolveCenterFromRadius,
   segmentEnds,
@@ -206,7 +207,16 @@ function drawDraft(
   if (draft.kind === "arcRadius") {
     // Guide chord, then the preview Arc when the radius resolves a center.
     dashedPolyline(ctx, transform, [draft.start, cursor]);
-    const center = resolveCenterFromRadius(draft.start, cursor, draft.radiusMm, draft.direction);
+    // A cursor on the draft start (the state right after the first
+    // click) resolves no center; the commit path rejects that click
+    // with a readable message, so the view simply skips the preview.
+    let center: Vec2 | null;
+    try {
+      center = resolveCenterFromRadius(draft.start, cursor, draft.radiusMm, draft.direction);
+    } catch (e) {
+      if (!(e instanceof CoreError)) throw e;
+      return;
+    }
     if (center === null) return;
     dashedPolyline(
       ctx,
