@@ -130,7 +130,24 @@ jobs:
           # assuming protection (same stance as the tenderagent merge gate).
           # --watch waits out pending checks — a review that finishes before
           # CI isn't held spuriously — and exits non-zero on any red check.
-          if ! gh pr checks "$PR_NUMBER" --watch --interval 30; then
+          # The review's own self-fix push precedes the new head's checks
+          # registration by a few seconds, and `gh pr checks` answers "no
+          # checks reported" (non-zero) in that window — retry through it
+          # instead of holding (found live: the gate queried 2s before the
+          # run registered and held a green PR).
+          ci_green=""
+          for attempt in $(seq 1 40); do
+            if gh pr checks "$PR_NUMBER" --watch --interval 30; then
+              ci_green="yes"
+              break
+            fi
+            if gh pr checks "$PR_NUMBER" 2>&1 | grep -qi "no checks reported"; then
+              sleep 15
+              continue
+            fi
+            break
+          done
+          if [ -z "$ci_green" ]; then
             echo "CI is not green — holding the merge."
             gh pr comment "$PR_NUMBER" --body "CI is not green on the head commit — auto-merge held. When CI passes, re-add \`agent:review\` (the review findings are already clean)."
             exit 0
