@@ -166,7 +166,7 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
     // Safety net: verify the solved angles through FK before trusting them.
     const achieved = forwardKinematics(solution);
     if (vec3Distance(achieved, target) > 1e-6) {
-      return { status: "fk-error", target: [zx, zy, target[2] as number], achieved };
+      return { status: "fk-error", target, achieved };
     }
     return { status: "ok", joints: solution };
   };

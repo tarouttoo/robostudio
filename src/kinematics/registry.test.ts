@@ -69,6 +69,20 @@ describe("robot registry configuration", () => {
     expect(result.problems.some((p) => p.includes("maxVelocityRadS"))).toBe(true);
   });
 
+  it("reports duplicate ids even when the earlier config with that id failed validation", () => {
+    const invalid = {
+      ...DEFAULT_MIKO_MINI_CONFIG,
+      geometry: { baseHeightMm: -1, upperArmMm: 90, forearmMm: 90 },
+    };
+    const result = createRobotRegistry([
+      invalid,
+      { ...invalid, geometry: DEFAULT_MIKO_MINI_CONFIG.geometry },
+    ]);
+    if (result.status !== "invalid-config") throw new Error("expected invalid-config");
+    expect(result.problems.some((p) => p.includes('duplicate model id "miko-mini"'))).toBe(true);
+    expect(result.problems.some((p) => p.includes("baseHeightMm"))).toBe(true);
+  });
+
   it("rejects unsupported model kinds and duplicate ids", () => {
     const renamed = { ...DEFAULT_MIKO_MINI_CONFIG, id: "twin" };
     const result = createRobotRegistry([

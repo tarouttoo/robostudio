@@ -33,12 +33,16 @@ export interface RobotRegistry {
 export function createRobotRegistry(configs: readonly RobotModelConfig[]): RegistryResult {
   const problems: string[] = [];
   const models = new Map<string, RobotModel>();
+  // Track every id seen, not only successfully built models, so a
+  // duplicate is reported no matter how the earlier config failed.
+  const seen = new Set<string>();
 
   for (const config of configs) {
-    if (models.has(config.id)) {
+    if (seen.has(config.id)) {
       problems.push(`duplicate model id "${config.id}"`);
       continue;
     }
+    seen.add(config.id);
     if (config.kind !== "miko-mini") {
       problems.push(`unsupported model kind "${String(config.kind)}" for id "${config.id}"`);
       continue;
