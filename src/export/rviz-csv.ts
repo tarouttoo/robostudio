@@ -17,13 +17,21 @@
  */
 
 import type { MotionPlan } from "../motion/planner";
-import { formatPlanCsv } from "./robot-csv";
+import { CSV_JOINT_COUNT, formatPlanCsv } from "./robot-csv";
 
 /**
  * Applies the RViz mounting-convention sign transform to one joint
- * vector: `[q1, −q2, −q3]`.
+ * vector: `[q1, −q2, −q3]`. The transform is defined for exactly the
+ * MiKo-mini's three joints — a shorter vector would silently produce
+ * `NaN` columns and a longer one would silently drop an axis, so any
+ * other length throws a `RangeError`.
  */
 export function rvizAngles(q: readonly number[]): readonly number[] {
+  if (q.length !== CSV_JOINT_COUNT) {
+    throw new RangeError(
+      `the RViz sign transform is defined for ${CSV_JOINT_COUNT} joint angles (q1, q2, q3), got ${q.length}`,
+    );
+  }
   return [q[0] as number, -(q[1] as number), -(q[2] as number)];
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CONTROL_STEP_MS, type MotionPlan, type MotionRow } from "../motion/planner";
-import { toRvizCsv } from "./rviz-csv";
+import { rvizAngles, toRvizCsv } from "./rviz-csv";
 
 /** Builds one MotionRow sitting on the control grid. */
 function rowOf(tMs: number, q: readonly number[]): MotionRow {
@@ -38,5 +38,12 @@ describe("RViz CSV exporter", () => {
 
   it("emits the bare header for an empty plan", () => {
     expect(toRvizCsv(planOf([]))).toBe("t,q1,q2,q3\n");
+  });
+
+  it("rejects joint vectors and rows whose length is not 3, instead of dropping axes or producing NaN", () => {
+    expect(() => rvizAngles([1, 2])).toThrow(RangeError);
+    expect(() => rvizAngles([1, 2, 3, 4])).toThrow(RangeError);
+    const plan = planOf([rowOf(0, [0, 0, 0, 0])]);
+    expect(() => toRvizCsv(plan)).toThrow(RangeError);
   });
 });

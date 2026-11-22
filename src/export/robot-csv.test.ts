@@ -38,6 +38,14 @@ describe("Robot CSV exporter", () => {
     expect(toRobotCsv(planOf([]))).toBe("t,q1,q2,q3\n");
   });
 
+  it("rejects a row whose joint count does not match the contracted 3-column layout", () => {
+    // A 4-joint row under the fixed `t,q1,q2,q3` header would be silent
+    // format drift (ADR 0006): it must fail loudly, never emit.
+    const plan = planOf([rowOf(0, [0, 0, 0, 0])]);
+    expect(() => toRobotCsv(plan)).toThrow(RangeError);
+    expect(() => toRobotCsv(plan)).toThrow(/3 joints/);
+  });
+
   it("writes one row per plan row on the 20 ms step, ignoring nothing", () => {
     const plan = planOf(
       Array.from({ length: 7 }, (_, i) => rowOf(i * CONTROL_STEP_MS, [i * 0.01, 0, 0])),
