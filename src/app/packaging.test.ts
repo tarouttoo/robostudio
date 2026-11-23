@@ -88,8 +88,11 @@ describe("electron-builder config (package.json build)", () => {
 
   it("names every artifact after the app and the released version", () => {
     for (const artifactName of artifactNames()) {
-      expect(artifactName).toMatch(/^\$\{name\}-\$\{version\}-[a-z]+\.\$\{ext\}$/);
+      expect(artifactName).toMatch(/^\$\{name\}-\$\{version\}-[a-z-]+\.\$\{ext\}$/);
     }
+    // The Windows zip carries the portable marker so the artifact name
+    // says what it is (issue #30); the installer already says "setup".
+    expect(pkg.build?.win?.artifactName).toContain("win-portable");
     // Three distinct artifacts: the installer, the Windows portable zip,
     // the Linux zip.
     expect(new Set(artifactNames()).size).toBe(3);
@@ -172,7 +175,7 @@ describe("release workflow (.github/workflows/release.yml)", () => {
     const check = runs(releaseJob).find((run) => run.includes("release-artifacts"));
     expect(check).toContain('"3"');
     expect(check).toContain("*-setup.exe");
-    expect(check).toContain("*-win.zip");
+    expect(check).toContain("*-win-portable.zip");
     expect(check).toContain("*-linux.zip");
   });
 

@@ -131,7 +131,7 @@ jobs:
             exit 1
           fi
           ls release-artifacts/*-setup.exe >/dev/null
-          ls release-artifacts/*-win.zip >/dev/null
+          ls release-artifacts/*-win-portable.zip >/dev/null
           ls release-artifacts/*-linux.zip >/dev/null
           ls -la release-artifacts
 

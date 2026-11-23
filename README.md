@@ -66,8 +66,8 @@ a draft GitHub release (ADR 0009):
 
 The tag is the single source of truth for the released version: the
 workflow stamps it into package.json before building, so the artifacts are
-named `robostudio-<version>-setup.exe`, `robostudio-<version>-win.zip` and
-`robostudio-<version>-linux.zip`. Publishing the draft stays manual.
+named `robostudio-<version>-setup.exe`, `robostudio-<version>-win-portable.zip`
+and `robostudio-<version>-linux.zip`. Publishing the draft stays manual.
 
 ## Agent pipeline
 
