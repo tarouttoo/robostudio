@@ -6,7 +6,7 @@ import { line } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import type { EditorState } from "./editor";
 import { initialEditorState } from "./editor";
-import { runGeneration, type GenerationOutcome } from "./generation";
+import { createGenerationSession, type GenerationOutcome, type GenerationSession } from "./generation";
 import { MIKO_MINI } from "./robot";
 import { ChartsView, chartsOf, chartTitle } from "./ChartsView";
 
@@ -18,9 +18,12 @@ function stateWith(segments: EditorState["segments"], home: EditorState["home"] 
   return { ...initialEditorState, home, segments };
 }
 
+/** The session under test: the shipped MiKo-mini model bound once. */
+const session: GenerationSession = createGenerationSession(MIKO_MINI);
+
 /** Runs generation, failing the test unless the pipeline succeeded. */
 function okOutcome(segments: EditorState["segments"]): Extract<GenerationOutcome, { kind: "ok" }> {
-  const outcome = runGeneration(stateWith(segments), MIKO_MINI);
+  const outcome = session.run(stateWith(segments));
   if (outcome.kind !== "ok") throw new Error(`expected ok, got ${outcome.kind}`);
   return outcome;
 }
@@ -45,9 +48,9 @@ describe("charts view: charts of a generation outcome", () => {
 
   it("shows no charts until a generation succeeds", () => {
     expect(chartsOf(null, MIKO_MINI)).toBeNull();
-    const failed = runGeneration(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]), MIKO_MINI);
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
     expect(chartsOf(failed, MIKO_MINI)).toBeNull();
-    const blocked = runGeneration({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] }, MIKO_MINI);
+    const blocked = session.run({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
     expect(chartsOf(blocked, MIKO_MINI)).toBeNull();
   });
 

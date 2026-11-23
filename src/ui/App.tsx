@@ -18,9 +18,9 @@ import {
   type ReachabilitySampler,
 } from "./canvas/reachability";
 import {
+  createGenerationSession,
   generationIsStale,
   generationLogLines,
-  runGeneration,
   type GenerationOutcome,
 } from "./generation";
 import { ChartsView, chartsOf } from "./ChartsView";
@@ -43,6 +43,14 @@ import {
 export type MainView = "drawing" | "charts";
 
 /**
+ * The Generation session: the Robot Model bound exactly once (ADR 0008)
+ * — the app passes MiKo-mini here and every «Сгенерировать» run goes
+ * through this one stable reference; a second robot is one
+ * configuration change at this factory, not edits across the shell.
+ */
+const generationSession = createGenerationSession(MIKO_MINI);
+
+/**
  * The main-area view a generation attempt lands on: a successful outcome
  * opens the refreshed charts of the new plan; a failed or blocked attempt
  * returns to the drawing — the charts tab locks again (the charts always
@@ -62,7 +70,7 @@ export function viewAfterGeneration(outcome: GenerationOutcome): MainView {
  * Drawn geometry is held as canonical Segments in the editor state (see
  * `editor.ts`); the canvas is a pure view over that state (ADR 0005,
  * ADR 0007). On «Сгенерировать» the drawn Trajectory runs through the
- * headless pipeline (`runGeneration`) and the validation stage log is
+ * headless pipeline (the Generation session's `run`) and the validation stage log is
  * shown; a successful generation unlocks «Экспорт CSV», which writes
  * the Robot CSV and RViz CSV into an operator-picked folder through the
  * main process, and switches the main area to «Графики» — every chart
@@ -88,7 +96,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
 
   /** Runs generation on the drawn Trajectory and shows the log; success opens the refreshed charts, a failure returns to the drawing. */
   const handleGenerate = (): void => {
-    const outcome = runGeneration(state, MIKO_MINI);
+    const outcome = generationSession.run(state);
     setGeneration(outcome);
     setExportMessage(null);
     setView(viewAfterGeneration(outcome));
