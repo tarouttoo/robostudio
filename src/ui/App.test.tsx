@@ -1,20 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 
-import { line } from "../core/trajectory";
-import { vec3 } from "../core/vec";
-import { App, viewAfterGeneration } from "./App";
-import { initialEditorState, type EditorState } from "./editor";
-import { createGenerationSession } from "./generation";
-import { MIKO_MINI } from "./robot";
-
-/** A reachable Home Point in the MiKo-mini workspace (as in generation.test.ts). */
-const HOME = vec3(80, 0, 60);
-
-/** Editor state holding exactly this drawing: Home Point plus Segments. */
-function stateWith(segments: EditorState["segments"]): EditorState {
-  return { ...initialEditorState, home: HOME, segments };
-}
+import { App } from "./App";
+import { initialEditorState } from "./editor";
 
 describe("app shell", () => {
   it("renders the app shell: name and the drawing editor panels", () => {
@@ -115,23 +103,5 @@ describe("app shell", () => {
     // The drawing tab starts unlocked and active.
     expect(html).toMatch(/<button[^>]*>[^<]*Чертёж/);
     expect(html).toContain("<canvas");
-  });
-});
-
-describe("main-area view after a generation attempt", () => {
-  it("opens the charts on success and returns to the drawing on a failed or blocked attempt", () => {
-    const session = createGenerationSession(MIKO_MINI);
-    // A successful run opens the refreshed charts.
-    const ok = session.run(stateWith([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]));
-    expect(viewAfterGeneration(ok)).toBe("charts");
-    // A failed run keeps no charts: the tab locks, the operator lands
-    // on the drawing while the sidebar log names the failure.
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
-    if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
-    expect(viewAfterGeneration(failed)).toBe("drawing");
-    // Same for a blocked start (no Home Point set).
-    const blocked = session.run({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
-    if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
-    expect(viewAfterGeneration(blocked)).toBe("drawing");
   });
 });

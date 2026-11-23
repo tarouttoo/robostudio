@@ -9,11 +9,13 @@ import type { ProjectContent } from "../project";
 import { editorReducer, initialEditorState, type EditorState } from "./editor";
 import {
   createGenerationSession,
-  generationIsStale,
+  exportEligibility,
   generationLogLines,
   stageLabel,
+  viewAfterGeneration,
   type GenerationOutcome,
   type GenerationSession,
+  type MainView,
 } from "./generation";
 import { MIKO_MINI } from "./robot";
 
@@ -258,31 +260,68 @@ describe("generation: log lines", () => {
   });
 });
 
-describe("generation: staleness after edits", () => {
-  it("a fresh successful generation is not stale", () => {
+describe("generation: export eligibility", () => {
+  it("a fresh successful generation is eligible, carrying exactly the CSVs it generated", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
-    const outcome = session.run(state);
-    expect(generationIsStale(outcome, state)).toBe(false);
+    const outcome = okOutcome(session, state);
+    const eligibility = exportEligibility(outcome, state);
+    if (eligibility.kind !== "eligible") throw new Error(`expected eligible, got ${eligibility.kind}`);
+    expect(eligibility.robotCsv).toBe(outcome.result.robotCsv);
+    expect(eligibility.rvizCsv).toBe(outcome.result.rvizCsv);
   });
 
-  it("editing the drawing after generation is stale (Feed edit, new Home Point)", () => {
+  it("editing the drawing after a successful generation goes stale, with the module's Russian regeneration notice", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
     const outcome = okOutcome(session, state);
     const feedEdited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw: "600" });
-    expect(generationIsStale(outcome, feedEdited)).toBe(true);
+    const stale = exportEligibility(outcome, feedEdited);
+    if (stale.kind !== "stale") throw new Error(`expected stale, got ${stale.kind}`);
+    expect(stale.notice).toContain("Чертёж изменился");
+    expect(stale.notice).toContain("сгенерируйте заново");
     const homeMoved = editorReducer({ ...state, tool: "home" }, { type: "canvasClick", u: 90, v: 0 });
-    expect(generationIsStale(outcome, homeMoved)).toBe(true);
+    expect(exportEligibility(outcome, homeMoved).kind).toBe("stale");
   });
 
-  it("failed or blocked generations are never stale, and neither is no generation", () => {
+  it("regenerating after an edit is eligible again, with the new run's CSVs", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
+    const outcome = okOutcome(session, state);
+    const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw: "600" });
+    expect(exportEligibility(outcome, edited).kind).toBe("stale");
+    const regenerated = okOutcome(session, edited);
+    const eligibility = exportEligibility(regenerated, edited);
+    if (eligibility.kind !== "eligible") throw new Error(`expected eligible, got ${eligibility.kind}`);
+    expect(eligibility.robotCsv).toBe(regenerated.result.robotCsv);
+    expect(eligibility.rvizCsv).toBe(regenerated.result.rvizCsv);
+  });
+
+  it("without a successful generation export stays locked: no run yet, a failed or a blocked attempt", () => {
+    const session = createGenerationSession(scriptedModel());
+    const state = stateWith(REACHABLE_LINE);
+    expect(exportEligibility(null, state).kind).toBe("no-success");
     const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
-    expect(generationIsStale(failed, state)).toBe(false);
+    expect(exportEligibility(failed, state).kind).toBe("no-success");
     const blocked = session.run({ ...initialEditorState });
-    expect(generationIsStale(blocked, state)).toBe(false);
-    expect(generationIsStale(null, state)).toBe(false);
+    expect(exportEligibility(blocked, state).kind).toBe("no-success");
+  });
+});
+
+describe("generation: landing view after an attempt", () => {
+  it("a successful attempt lands on the charts; a failed or blocked attempt returns to the drawing", () => {
+    const session = createGenerationSession(scriptedModel());
+    // A successful run opens the refreshed charts.
+    const ok = okOutcome(session, stateWith(REACHABLE_LINE));
+    expect(viewAfterGeneration(ok)).toBe<MainView>("charts");
+    // A failed run keeps no charts: the tab locks, the operator lands
+    // on the drawing while the sidebar log names the failure.
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
+    expect(viewAfterGeneration(failed)).toBe<MainView>("drawing");
+    // Same for a blocked start (no Home Point set).
+    const blocked = session.run({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
+    if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
+    expect(viewAfterGeneration(blocked)).toBe<MainView>("drawing");
   });
 });

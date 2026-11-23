@@ -19,9 +19,11 @@ import {
 } from "./canvas/reachability";
 import {
   createGenerationSession,
-  generationIsStale,
+  exportEligibility,
   generationLogLines,
+  viewAfterGeneration,
   type GenerationOutcome,
+  type MainView,
 } from "./generation";
 import { ChartsView } from "./ChartsView";
 import { MIKO_MINI } from "./robot";
@@ -39,9 +41,6 @@ import {
   type EditorTool,
 } from "./editor";
 
-/** The main area's view: the drawing canvas, or the charts of the last generation. */
-export type MainView = "drawing" | "charts";
-
 /**
  * The Generation session: the Robot Model bound exactly once (ADR 0008)
  * — the app passes MiKo-mini here and every «Сгенерировать» run goes
@@ -49,17 +48,6 @@ export type MainView = "drawing" | "charts";
  * configuration change at this factory, not edits across the shell.
  */
 const generationSession = createGenerationSession(MIKO_MINI);
-
-/**
- * The main-area view a generation attempt lands on: a successful outcome
- * opens the refreshed charts of the new plan; a failed or blocked attempt
- * returns to the drawing — the charts tab locks again (the charts always
- * show the last *successful* generation), so the operator lands where the
- * rejected drawing is fixed while the sidebar log names the failure.
- */
-export function viewAfterGeneration(outcome: GenerationOutcome): MainView {
-  return outcome.kind === "ok" ? "charts" : "drawing";
-}
 
 /**
  * The trajectory editor: the operator picks the Working Plane with its
@@ -93,6 +81,9 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [view, setView] = useState<MainView>("drawing");
   /** The charts of the last successful generation, carried on its outcome (ADR 0013). */
   const charts = generation !== null && generation.kind === "ok" ? generation.charts : null;
+  /** The Generation module's one export-policy answer: the export button's
+   * disabled state, its stale notice, and the export guard all consume it. */
+  const eligibility = exportEligibility(generation, state);
   const letters = planeAxisLetters(state.plane);
 
   /** Runs generation on the drawn Trajectory and shows the log; success opens the refreshed charts, a failure returns to the drawing. */
@@ -103,15 +94,16 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
     setView(viewAfterGeneration(outcome));
   };
 
-  /** Writes the generated Robot CSV and RViz CSV into a picked folder. */
+  /** Writes the generated Robot CSV and RViz CSV into a picked folder; the
+   * eligibility predicate is the gate — only an eligible generation exports. */
   const handleExport = async (): Promise<void> => {
-    if (generation === null || generation.kind !== "ok") return;
+    if (eligibility.kind !== "eligible") return;
     const api = bridge();
     if (api === null) {
       setExportMessage({ text: "Экспорт недоступен: нет моста к основному процессу.", isError: true });
       return;
     }
-    const result = await api.exportCsvs(generation.result.robotCsv, generation.result.rvizCsv);
+    const result = await api.exportCsvs(eligibility.robotCsv, eligibility.rvizCsv);
     if (result.kind === "exported") setExportMessage({ text: `Экспортировано: ${result.files.join(", ")}`, isError: false });
     else if (result.kind === "canceled") setExportMessage(null);
     else setExportMessage({ text: `Экспорт не выполнен: ${result.error.message}`, isError: true });
@@ -355,7 +347,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
               <button
                 type="button"
                 onClick={() => void handleExport()}
-                disabled={generation === null || generation.kind !== "ok" || generationIsStale(generation, state)}
+                disabled={eligibility.kind !== "eligible"}
               >
                 Экспорт CSV…
               </button>
@@ -387,9 +379,9 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 ))}
               </div>
             )}
-            {generation !== null && generation.kind === "ok" && generationIsStale(generation, state) && (
+            {eligibility.kind === "stale" && (
               <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
-                Чертёж изменился после генерации — сгенерируйте заново перед экспортом.
+                {eligibility.notice}
               </p>
             )}
             {exportMessage !== null && (
