@@ -1,0 +1,139 @@
+name: Release
+
+# Draft release on a `v*` tag (ADR 0009): the build legs run electron-builder
+# for the current platform — the Windows leg builds the NSIS installer and
+# the portable zip, the Linux leg the portable zip — and the release job
+# gathers the artifacts and opens a single draft GitHub release. Publishing
+# the draft stays manual (release publishing is a one-way door).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# Re-pushing the same tag queues instead of racing the in-flight release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: electron-builder (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # `cache: npm` above does not cover the Electron binary, which
+      # @electron/get stores in its own per-OS cache directory (same
+      # rationale as ci.yml).
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The tag is the single source of truth for the released version:
+      # stamping it before the build makes every artifact name carry the
+      # tag version (robostudio-<version>-…), never a stale package.json.
+      - name: Stamp the version from the tag
+        shell: bash
+        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+
+      # Same gate as CI: release artifacts ship outward, so unverified
+      # code must fail the run instead of being packaged.
+      - name: Lint and typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+
+      # The pipeline suites (.sandcastle) are agent infrastructure and
+      # only run on ubuntu; a release ships the app, so both legs run the
+      # app tests (same split rationale as ci.yml).
+      - name: Test (app)
+        run: npm run test:app
+
+      - name: Build the app bundles
+        run: npm run build
+
+      # Targets come from the electron-builder config in package.json
+      # (ADR 0009), so electron-builder builds the current platform's
+      # configured targets. It must not publish: a matrix leg publishing
+      # would race the other leg into two draft releases.
+      - name: Package
+        run: npx electron-builder --publish never
+
+      # Only the finished artifacts are uploaded — the unpacked
+      # directories, blockmaps and update metadata that electron-builder
+      # also writes into release/ are excluded by these globs.
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Open draft GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The only job that needs to write: the build legs run third-party
+    # code (npm ci, electron-builder) and get read-only access.
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-artifacts
+
+      # The ADR 0009 release carries exactly three artifacts: the Windows
+      # installer, the Windows portable zip, the Linux zip — versioned
+      # names, per the electron-builder config (README documents them). A
+      # different count or a drifted name fails loudly here instead of
+      # attaching a wrong release.
+      - name: Check the three artifacts
+        run: |
+          set -euo pipefail
+          count=$(ls release-artifacts | wc -l)
+          if [ "$count" != "3" ]; then
+            echo "Expected exactly 3 release artifacts (Windows installer, Windows portable zip, Linux zip), found $count:" >&2
+            ls release-artifacts >&2
+            exit 1
+          fi
+          ls release-artifacts/*-setup.exe >/dev/null
+          ls release-artifacts/*-win.zip >/dev/null
+          ls release-artifacts/*-linux.zip >/dev/null
+          ls -la release-artifacts
+
+      - name: Open draft release
+        run: gh release create "${GITHUB_REF_NAME}" --draft --title "robostudio ${GITHUB_REF_NAME}" --generate-notes release-artifacts/*
