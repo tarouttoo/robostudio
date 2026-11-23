@@ -5,4 +5,7 @@
  *
  * May import only from `core`.
  */
-export {};
+export { PROJECT_SCHEMA_VERSION, parseProject, serializeProject } from "./file";
+export type { ProjectContent, ProjectView } from "./file";
+export { ProjectError, type ProjectErrorTag } from "./errors";
+export type { BridgeError, OpenProjectResult, SaveProjectResult } from "./bridge";

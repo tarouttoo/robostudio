@@ -26,6 +26,7 @@ import {
   type Vec3,
   type WorkingPlane,
 } from "../core";
+import type { ProjectContent } from "../project";
 
 /** Arc travel direction, re-exported for the UI that configures it. */
 export type { ArcDirection };
@@ -103,7 +104,8 @@ export type EditorAction =
   | { readonly type: "setSegmentFeedMmMin"; readonly index: number; readonly raw: string }
   | { readonly type: "cancelDraft" }
   | { readonly type: "undo" }
-  | { readonly type: "clear" };
+  | { readonly type: "clear" }
+  | { readonly type: "loadProject"; readonly content: ProjectContent };
 
 /**
  * Converts a UI Feed in mm/min to the internal mm/s.
@@ -244,6 +246,22 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, segments: state.segments.slice(0, -1) };
     case "clear":
       return { ...state, segments: [], home: null, draftStart: null, draftCenter: null, error: null };
+    case "loadProject":
+      // The content is already validated by the project layer; restore
+      // the drawing (view settings, Home Point, Segments) wholesale and
+      // drop any pending draft. The active tool is not part of the
+      // drawing and stays as the operator left it.
+      return {
+        ...state,
+        plane: action.content.view.plane,
+        fixedMm: action.content.view.fixedMm,
+        feedMmMin: action.content.view.feedMmMin,
+        home: action.content.home,
+        segments: [...action.content.segments],
+        draftStart: null,
+        draftCenter: null,
+        error: null,
+      };
   }
 }
 
@@ -349,6 +367,20 @@ function arcRejectMessage(error: CoreError, radiusMm: number, chordMm: number): 
     default:
       return `Дуга невозможна: ${error.message}`;
   }
+}
+
+/**
+ * Collects the Project File content from the editor state: the view
+ * settings (Working Plane, fixed coordinate, default Feed in mm/min),
+ * the Home Point, and the canonical Segments. Transient state (active
+ * tool, pending draft) is not saved.
+ */
+export function projectContentOf(state: EditorState): ProjectContent {
+  return {
+    view: { plane: state.plane, fixedMm: state.fixedMm, feedMmMin: state.feedMmMin },
+    home: state.home,
+    segments: state.segments,
+  };
 }
 
 /** Parses `raw` as any finite number, falling back to `fallback`. */

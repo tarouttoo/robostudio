@@ -1,7 +1,9 @@
 import { useMemo, useReducer, useState, type JSX } from "react";
 
 import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
+import { serializeProject } from "../project";
 import { APP_NAME, APP_VERSION } from "../core/version";
+import { projectBridge } from "./bridge";
 import {
   DEFAULT_MIKO_MINI_CONFIG,
   createMiKoMiniModel,
@@ -27,6 +29,7 @@ import {
   mmMinToMmS,
   mmSToMmMin,
   planeAxisLetters,
+  projectContentOf,
   type ArcMode,
   type ArcDirection,
   type EditorState,
@@ -60,7 +63,38 @@ const ROBOT: RobotModel = (() => {
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  /** Status of the last Project File operation; the flag, not the text, decides the colour. */
+  const [projectMessage, setProjectMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
   const letters = planeAxisLetters(state.plane);
+
+  /** Saves the drawing as a Project File through the main process. */
+  const handleSave = async (): Promise<void> => {
+    const bridge = projectBridge();
+    if (bridge === null) {
+      setProjectMessage({ text: "Сохранение недоступно: нет моста к основному процессу.", isError: true });
+      return;
+    }
+    const json = serializeProject(projectContentOf(state));
+    const result = await bridge.saveProject(json);
+    if (result.kind === "saved") setProjectMessage({ text: `Сохранено: ${result.path}`, isError: false });
+    else if (result.kind === "canceled") setProjectMessage(null);
+    else setProjectMessage({ text: `Не сохранено: ${result.error.message}`, isError: true });
+  };
+
+  /** Opens a Project File through the main process and restores the drawing. */
+  const handleOpen = async (): Promise<void> => {
+    const bridge = projectBridge();
+    if (bridge === null) {
+      setProjectMessage({ text: "Открытие недоступно: нет моста к основному процессу.", isError: true });
+      return;
+    }
+    const result = await bridge.openProject();
+    if (result.kind === "loaded") {
+      dispatch({ type: "loadProject", content: result.content });
+      setProjectMessage({ text: `Открыт: ${result.path}`, isError: false });
+    } else if (result.kind === "canceled") setProjectMessage(null);
+    else setProjectMessage({ text: result.error.message, isError: true });
+  };
 
   // Live Reachability: a fresh map per (robot, plane, fixed coordinate)
   // is the recolouring trigger; inside one map every answered cell is
@@ -241,6 +275,29 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
               Очистить
             </button>
           </div>
+          <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <h2 style={{ fontSize: "1rem", margin: 0 }}>Файл проекта</h2>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" onClick={() => void handleSave()}>
+                Сохранить
+              </button>
+              <button type="button" onClick={() => void handleOpen()}>
+                Открыть
+              </button>
+            </div>
+            {projectMessage !== null && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.85rem",
+                  color: projectMessage.isError ? "#b00" : "#555",
+                  wordBreak: "break-all",
+                }}
+              >
+                {projectMessage.text}
+              </p>
+            )}
+          </section>
           <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
             Правая кнопка мыши отменяет незавершённый элемент.
           </p>
