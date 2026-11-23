@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import { APP_NAME } from "../core/version";
+import { exportCsvs, type ExportDialogs } from "./export-ipc";
 import { openProjectFile, saveProjectFile, type ProjectDialogs } from "./project-ipc";
 import {
   BrowserWindow,
@@ -14,18 +15,19 @@ import {
 /** URL of the Vite dev server; set by `npm run dev`, absent in production. */
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
-/** Whether the Project File IPC handlers are registered (once per app). */
-let projectIpcRegistered = false;
+/** Whether the IPC handlers are registered (once per app). */
+let ipcRegistered = false;
 
 /**
- * Registers the Project File IPC handlers: the save/open dialogs and
- * the file system access run here, in the main process — the sandboxed
- * renderer only ever sees the result records (ADR 0003). Registered
- * once; later windows share the same channels.
+ * Registers the IPC handlers: the Project File save/open dialogs and
+ * the CSV export folder picker, plus the file system access behind
+ * them, run here in the main process — the sandboxed renderer only
+ * ever sees the result records (ADR 0003). Registered once; later
+ * windows share the same channels.
  */
-function registerProjectIpc(): void {
-  if (projectIpcRegistered) return;
-  projectIpcRegistered = true;
+function registerIpc(): void {
+  if (ipcRegistered) return;
+  ipcRegistered = true;
   // The dialog parent is resolved at call time, not captured here: a
   // registered handler outlives any window (macOS re-activate creates a
   // new one), and a destroyed parent would make every dialog throw.
@@ -52,6 +54,19 @@ function registerProjectIpc(): void {
   };
   ipcMain.handle("project:save", (_event, json: string) => saveProjectFile(dialogs, json));
   ipcMain.handle("project:open", () => openProjectFile(dialogs));
+  const exportDialogs: ExportDialogs = {
+    showDirectory: () => {
+      const options: OpenDialogOptions = {
+        title: "Экспорт CSV: выберите папку",
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const owner = parent();
+      return owner === undefined ? dialog.showOpenDialog(options) : dialog.showOpenDialog(owner, options);
+    },
+  };
+  ipcMain.handle("export:csvs", (_event, robotCsv: string, rvizCsv: string) =>
+    exportCsvs(exportDialogs, robotCsv, rvizCsv),
+  );
 }
 
 /**
@@ -77,7 +92,7 @@ function createMainWindow(): BrowserWindow {
   } else {
     void window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
   }
-  registerProjectIpc();
+  registerIpc();
   return window;
 }
 
