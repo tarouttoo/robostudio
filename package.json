@@ -21,7 +21,7 @@
         "nsis",
         "zip"
       ],
-      "artifactName": "${name}-${version}-win.${ext}"
+      "artifactName": "${name}-${version}-win-portable.${ext}"
     },
     "nsis": {
       "oneClick": true,
