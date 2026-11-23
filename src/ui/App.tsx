@@ -25,7 +25,7 @@ import {
   type GenerationOutcome,
   type MainView,
 } from "./generation";
-import { ChartsView, chartsOf } from "./ChartsView";
+import { ChartsView } from "./ChartsView";
 import { MIKO_MINI } from "./robot";
 import {
   draftPreviewOf,
@@ -62,10 +62,11 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * shown; a successful generation unlocks «Экспорт CSV», which writes
  * the Robot CSV and RViz CSV into an operator-picked folder through the
  * main process, and switches the main area to «Графики» — every chart
- * the headless renderer produced from the new Motion Plan (ADR 0013,
- * `ChartsView.tsx`). Regeneration replaces those charts with the new
- * plan's data; a failed or blocked run keeps no charts and returns to
- * «Чертёж». UI text is Russian per GLOSSARY.md.
+ * the outcome carries, rendered at Generation time by the headless
+ * renderer (ADR 0013, `ChartsView.tsx`). Regeneration replaces those
+ * charts with the new outcome's documents; a failed or blocked run
+ * carries no charts and returns to «Чертёж». UI text is Russian per
+ * GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
@@ -78,8 +79,8 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [exportMessage, setExportMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
   /** Which main-area view is shown: the drawing canvas or the charts. */
   const [view, setView] = useState<MainView>("drawing");
-  /** The charts of the last successful generation, through the headless seam (ADR 0013). */
-  const charts = useMemo(() => chartsOf(generation, MIKO_MINI), [generation]);
+  /** The charts of the last successful generation, carried on its outcome (ADR 0013). */
+  const charts = generation !== null && generation.kind === "ok" ? generation.charts : null;
   /** The Generation module's one export-policy answer: the export button's
    * disabled state, its stale notice, and the export guard all consume it. */
   const eligibility = exportEligibility(generation, state);

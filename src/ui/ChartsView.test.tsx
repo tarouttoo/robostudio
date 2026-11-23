@@ -8,7 +8,7 @@ import type { EditorState } from "./editor";
 import { initialEditorState } from "./editor";
 import { createGenerationSession, type GenerationOutcome, type GenerationSession } from "./generation";
 import { MIKO_MINI } from "./robot";
-import { ChartsView, chartsOf, chartTitle } from "./ChartsView";
+import { ChartsView, chartTitle } from "./ChartsView";
 
 /** A reachable Home Point in the MiKo-mini workspace (as in generation.test.ts). */
 const HOME = vec3(80, 0, 60);
@@ -21,53 +21,15 @@ function stateWith(segments: EditorState["segments"], home: EditorState["home"] 
 /** The session under test: the shipped MiKo-mini model bound once. */
 const session: GenerationSession = createGenerationSession(MIKO_MINI);
 
-/** Runs generation, failing the test unless the pipeline succeeded. */
+/**
+ * Runs generation, failing the test unless the pipeline succeeded; the
+ * returned outcome carries the chart documents the view embeds.
+ */
 function okOutcome(segments: EditorState["segments"]): Extract<GenerationOutcome, { kind: "ok" }> {
   const outcome = session.run(stateWith(segments));
   if (outcome.kind !== "ok") throw new Error(`expected ok, got ${outcome.kind}`);
   return outcome;
 }
-
-/** The tick labels of one axis class, parsed from a chart SVG document. */
-function tickTexts(svg: string, className: string): readonly string[] {
-  return [...svg.matchAll(new RegExp(`<text class="${className}"[^>]*>([^<]*)</text>`, "g"))].map(
-    (m) => m[1] as string,
-  );
-}
-
-describe("charts view: charts of a generation outcome", () => {
-  it("renders every chart kind through the headless seam, in run order", () => {
-    const charts = chartsOf(okOutcome([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]), MIKO_MINI);
-    if (charts === null) throw new Error("expected charts for a successful generation");
-    expect(charts.map((c) => c.id)).toEqual([...CHART_IDS]);
-    for (const chart of charts) {
-      expect(chart.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
-      expect(chart.svg.endsWith("</svg>")).toBe(true);
-    }
-  });
-
-  it("shows no charts until a generation succeeds", () => {
-    expect(chartsOf(null, MIKO_MINI)).toBeNull();
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
-    expect(chartsOf(failed, MIKO_MINI)).toBeNull();
-    const blocked = session.run({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
-    expect(chartsOf(blocked, MIKO_MINI)).toBeNull();
-  });
-
-  it("regeneration replaces the charts with the new plan's data", () => {
-    const short = chartsOf(okOutcome([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]), MIKO_MINI);
-    const long = chartsOf(okOutcome([line({ start: HOME, end: vec3(180, 0, 60), feed: 20 })]), MIKO_MINI);
-    if (short === null || long === null) throw new Error("expected charts for both generations");
-    // Every chart redraws: no document survives the regeneration as-is.
-    expect(long.map((c) => c.svg)).not.toEqual(short.map((c) => c.svg));
-    // The new data is the new plan's: the time axis labels the longer
-    // plan's duration, not the first run's.
-    const durationMs = Math.max(...okOutcome([line({ start: HOME, end: vec3(180, 0, 60), feed: 20 })]).result.plan.rows.map((r) => r.tMs));
-    const positions = long.find((c) => c.id === "joint-positions");
-    if (!positions) throw new Error("expected a joint-positions chart");
-    expect(tickTexts(positions.svg, "tick-x")).toContain(String(durationMs));
-  });
-});
 
 describe("charts view: Russian captions per GLOSSARY", () => {
   it("translates every chart kind title, no synonyms", () => {
@@ -88,16 +50,17 @@ describe("charts view: Russian captions per GLOSSARY", () => {
 });
 
 describe("charts view: component", () => {
-  it("shows every chart document under its Russian caption", () => {
-    const charts = chartsOf(okOutcome([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]), MIKO_MINI);
-    if (charts === null) throw new Error("expected charts for a successful generation");
-    const html = renderToString(<ChartsView charts={charts} />);
+  it("shows every chart of the last generation under its Russian caption", () => {
+    // The documents come straight off the generation outcome — rendered
+    // at Generation time, the view plots nothing itself.
+    const outcome = okOutcome([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]);
+    const html = renderToString(<ChartsView charts={outcome.charts} />);
     expect(html).toContain("Графики");
     for (const id of CHART_IDS) {
       expect(html).toContain(chartTitle(id));
     }
-    // The very documents the headless renderer produced are embedded,
-    // one per chart kind — the UI plots nothing itself.
+    // The very documents the outcome carries are embedded, one per
+    // chart kind — the UI plots nothing itself.
     const svgCount = [...html.matchAll(/<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g)].length;
     expect(svgCount).toBe(CHART_IDS.length);
     expect(html).toContain('<polyline class="series"');

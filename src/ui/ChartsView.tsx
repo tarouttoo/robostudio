@@ -5,31 +5,18 @@
  * jerks over time, the reconstructed cartesian path, end-effector
  * velocity and acceleration, and the 3D path view.
  *
- * This module plots nothing of its own: `chartsOf` derives the
- * documents from the generation outcome through the one rendering seam
- * tested headless (`renderCharts`, ADR 0013), and the `ChartsView`
+ * This module plots nothing of its own: the chart documents arrive as
+ * data on the generation outcome — rendered at Generation time by the
+ * one headless seam (`renderCharts`, ADR 0013) — and the `ChartsView`
  * component embeds those exact SVG documents under Russian captions —
  * the UI translates titles, not data, per GLOSSARY.md. Regeneration
- * produces a new outcome, so the derived charts (and only they) are
- * replaced with the new plan's data.
+ * produces a new outcome carrying its own charts, so the shown
+ * documents (and only they) are replaced with the new plan's data.
  */
 
 import type { JSX } from "react";
 
-import { renderCharts, type ChartId, type RenderedChart } from "../export";
-import type { RobotModel } from "../kinematics/robot-model";
-import type { GenerationOutcome } from "./generation";
-
-/**
- * The charts a generation outcome contributes to the view: every chart
- * kind from the headless renderer, in run order, for a successful
- * generation; `null` while nothing has been generated (the view stays
- * locked). Pure — the same outcome yields the same documents.
- */
-export function chartsOf(outcome: GenerationOutcome | null, model: RobotModel): readonly RenderedChart[] | null {
-  if (outcome === null || outcome.kind !== "ok") return null;
-  return renderCharts(outcome.result.plan, model);
-}
+import { type ChartId, type RenderedChart } from "../export";
 
 /**
  * The Russian UI caption of one chart kind, per GLOSSARY.md (Chart,
@@ -58,9 +45,9 @@ export function chartTitle(id: ChartId): string {
   }
 }
 
-/** Props of the charts view: the documents to show, in run order. */
+/** Props of the charts view: the outcome's documents to show, in run order. */
 export interface ChartsViewProps {
-  /** One rendered chart per chart kind, from `chartsOf`. */
+  /** One rendered chart per chart kind, off the generation outcome. */
   readonly charts: readonly RenderedChart[];
 }
 
