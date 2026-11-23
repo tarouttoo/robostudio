@@ -1,12 +1,30 @@
-import { useReducer, useState, type JSX } from "react";
+import { useMemo, useReducer, useState, type JSX } from "react";
 
-import { type Segment, type Vec2, type Vec3 } from "../core";
+import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
 import { APP_NAME, APP_VERSION } from "../core/version";
+import {
+  DEFAULT_MIKO_MINI_CONFIG,
+  createMiKoMiniModel,
+} from "../kinematics/miko-mini";
+import {
+  checkPointReachability,
+  checkSegmentReachability,
+  type PointReachability,
+  type ReachabilityViolation,
+} from "../kinematics/reachability";
+import type { RobotModel } from "../kinematics/robot-model";
 import { Canvas } from "./Canvas";
+import { VIOLATION_COLOR } from "./canvas/draw";
+import {
+  REACHABILITY_COLORS,
+  createReachabilitySampler,
+  type ReachabilitySampler,
+} from "./canvas/reachability";
 import {
   draftPreviewOf,
   editorReducer,
   initialEditorState,
+  mmMinToMmS,
   mmSToMmMin,
   planeAxisLetters,
   type ArcMode,
@@ -14,6 +32,20 @@ import {
   type EditorState,
   type EditorTool,
 } from "./editor";
+
+/**
+ * The v1 Robot Model every drawing view is checked against: the
+ * default MiKo-mini configuration (ADR 0008). Built once at module
+ * load; the shipped configuration is validated by the kinematics tests,
+ * so a failure here is a programming error, not a runtime condition.
+ */
+const ROBOT: RobotModel = (() => {
+  const built = createMiKoMiniModel(DEFAULT_MIKO_MINI_CONFIG);
+  if (built.status !== "ok") {
+    throw new Error(`invalid default MiKo-mini config: ${built.problems.join("; ")}`);
+  }
+  return built.model;
+})();
 
 /**
  * The trajectory editor: the operator picks the Working Plane with its
@@ -29,6 +61,31 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const letters = planeAxisLetters(state.plane);
+
+  // Live Reachability: a fresh map per (robot, plane, fixed coordinate)
+  // is the recolouring trigger; inside one map every answered cell is
+  // cached, so redrawing stays responsive.
+  const reachability = useMemo<ReachabilitySampler>(
+    () => createReachabilitySampler(ROBOT, state.plane, state.fixedMm),
+    [state.plane, state.fixedMm],
+  );
+  // One check per committed Segment, aligned with the draw order.
+  const violations = useMemo<readonly (ReachabilityViolation | null)[]>(
+    () => state.segments.map((segment) => checkSegmentReachability(ROBOT, segment)),
+    [state.segments],
+  );
+  const homeStatus = useMemo<PointReachability | null>(
+    () => (state.home === null ? null : checkPointReachability(ROBOT, [state.home.x, state.home.y, state.home.z])),
+    [state.home],
+  );
+  // The pending draft is checked against the hovered endpoint, so the
+  // preview turns red before the operator commits an unreachable Line.
+  const draftViolation = useMemo<ReachabilityViolation | null>(() => {
+    if (state.draftStart === null || cursor === null) return null;
+    const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
+    const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
+    return checkSegmentReachability(ROBOT, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
+  }, [state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -71,6 +128,12 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 step={1}
               />
             </label>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", color: "#555" }}>
+              Достижимость:
+              <LegendSwatch color={REACHABILITY_COLORS.ok} label="достижимо" />
+              <LegendSwatch color={REACHABILITY_COLORS.unreachable} label="недостижимо" />
+              <LegendSwatch color={REACHABILITY_COLORS["angle-limit"]} label="предел шарнира" />
+            </div>
           </fieldset>
 
           <fieldset style={fieldsetStyle}>
@@ -189,26 +252,40 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
               {state.home === null ? (
                 "не задана"
               ) : (
-                <span style={{ fontFamily: "monospace" }}>{formatVec3(state.home)}</span>
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    color: homeStatus === "ok" ? undefined : VIOLATION_COLOR,
+                  }}
+                >
+                  {formatVec3(state.home)}
+                  {homeStatus !== null && homeStatus !== "ok" ? ` — ${statusWord(homeStatus)}` : ""}
+                </span>
               )}
             </div>
             <div style={{ color: "#555", fontSize: "0.9rem" }}>Участков: {state.segments.length}</div>
             <ol style={{ margin: 0, paddingLeft: "1.25rem", fontSize: "0.85rem", overflowY: "auto" }}>
-              {state.segments.map((segment, i) => (
-                <li key={i} style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>
-                  {segmentLabel(segment)}
-                  <label style={{ ...rowStyle, fontFamily: "system-ui, sans-serif", marginTop: "0.15rem" }}>
-                    Подача, мм/мин{" "}
-                    <NumberField
-                      key={`${i}:${segment.feed}`}
-                      value={mmSToMmMin(segment.feed)}
-                      onCommit={(raw) => dispatch({ type: "setSegmentFeedMmMin", index: i, raw })}
-                      step={60}
-                      min={1}
-                    />
-                  </label>
-                </li>
-              ))}
+              {state.segments.map((segment, i) => {
+                const violation = violations[i] ?? null;
+                return (
+                  <li key={i} style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>
+                    {segmentLabel(segment)}
+                    {violation !== null && (
+                      <div style={{ color: VIOLATION_COLOR }}>{violationLabel(violation)}</div>
+                    )}
+                    <label style={{ ...rowStyle, fontFamily: "system-ui, sans-serif", marginTop: "0.15rem" }}>
+                      Подача, мм/мин{" "}
+                      <NumberField
+                        key={`${i}:${segment.feed}`}
+                        value={mmSToMmMin(segment.feed)}
+                        onCommit={(raw) => dispatch({ type: "setSegmentFeedMmMin", index: i, raw })}
+                        step={60}
+                        min={1}
+                      />
+                    </label>
+                  </li>
+                );
+              })}
             </ol>
           </section>
         </aside>
@@ -220,6 +297,10 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
             home={state.home}
             draft={draftPreviewOf(state)}
             cursor={cursor}
+            reachability={reachability}
+            violations={violations}
+            draftViolation={draftViolation}
+            homeStatus={homeStatus}
             onPlaneClick={(uv) => dispatch({ type: "canvasClick", u: uv.x, v: uv.y })}
             onCursorMove={setCursor}
             onDraftCancel={() => dispatch({ type: "cancelDraft" })}
@@ -251,6 +332,46 @@ const fieldsetStyle = { border: "1px solid #ddd", borderRadius: 4, margin: 0, pa
 
 /** One labelled row inside a fieldset. */
 const rowStyle = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;
+
+/** One Reachability legend entry: a colour swatch followed by its Russian label. */
+function LegendSwatch(props: { readonly color: string; readonly label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+      <span
+        style={{
+          width: 10,
+          height: 10,
+          background: props.color,
+          border: "1px solid #bbb",
+          display: "inline-block",
+        }}
+      />
+      {props.label}
+    </span>
+  );
+}
+
+/** The Russian UI word for one Reachability status, as in the legend. */
+function statusWord(status: PointReachability): string {
+  switch (status) {
+    case "ok":
+      return "достижимо";
+    case "unreachable":
+      return "недостижимо";
+    case "angle-limit":
+      return "предел шарнира";
+  }
+}
+
+/** The Russian UI note for one Reachability violation, naming the place and cause. */
+function violationLabel(violation: ReachabilityViolation): string {
+  switch (violation.status) {
+    case "unreachable":
+      return `${statusWord(violation.status)} (${formatVec3(violation.atMm)})`;
+    case "angle-limit":
+      return `${statusWord(violation.status)} ${violation.joint} (${violation.bound === "min" ? "мин" : "макс"})`;
+  }
+}
 
 /**
  * A numeric field for millimetre and feed values: keeps the raw text

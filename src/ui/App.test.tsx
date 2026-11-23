@@ -34,6 +34,14 @@ describe("app shell", () => {
     expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="line"/);
   });
 
+  it("renders the Reachability map legend", () => {
+    const html = renderToString(<App />).replace(/<!-- -->/g, "");
+    expect(html).toContain("Достижимость");
+    expect(html).toContain("достижимо");
+    expect(html).toContain("недостижимо");
+    expect(html).toContain("предел шарнира");
+  });
+
   it("renders the Arc and Point tools with the Arc definition options", () => {
     // The Arc definition options show while the Arc tool is active.
     const html = renderToString(<App initialState={{ ...initialEditorState, tool: "arc" }} />).replace(/<!-- -->/g, "");
