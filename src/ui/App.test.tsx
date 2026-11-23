@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 
 import { App } from "./App";
+import { initialEditorState } from "./editor";
 
 describe("app shell", () => {
   it("renders the app shell: name and the drawing editor panels", () => {
@@ -39,5 +40,30 @@ describe("app shell", () => {
     expect(html).toContain("достижимо");
     expect(html).toContain("недостижимо");
     expect(html).toContain("предел шарнира");
+  });
+
+  it("renders the Arc and Point tools with the Arc definition options", () => {
+    // The Arc definition options show while the Arc tool is active.
+    const html = renderToString(<App initialState={{ ...initialEditorState, tool: "arc" }} />).replace(/<!-- -->/g, "");
+    // Tools per GLOSSARY.md: Дуга (Arc), Точка (Point Segment).
+    expect(html).toContain("Дуга");
+    expect(html).toContain("Точка");
+    // Arc definition modes per ADR 0005: radius R or explicit center.
+    expect(html).toContain("Радиус R");
+    expect(html).toContain("Центр");
+    // Direction per GLOSSARY.md: CW (по часовой), CCW (против часовой).
+    expect(html).toMatch(/name="arcDirection"[^>]*value="CW"/);
+    expect(html).toMatch(/name="arcDirection"[^>]*value="CCW"/);
+    expect(html).toContain("по часовой");
+    expect(html).toContain("против часовой");
+    // The Arc tool is preselected in this render.
+    expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="arc"/);
+    expect(html).toMatch(/<input type="radio" name="arcMode"[^>]*checked[^>]*value="radius"/);
+  });
+
+  it("renders the numeric coordinate entry for the active tool", () => {
+    const html = renderToString(<App />).replace(/<!-- -->/g, "");
+    expect(html).toContain("Ввод координат");
+    expect(html).toContain("Ввести точку");
   });
 });

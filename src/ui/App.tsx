@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useState } from "react";
+import { useMemo, useReducer, useState, type JSX } from "react";
 
 import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
 import { APP_NAME, APP_VERSION } from "../core/version";
@@ -21,11 +21,15 @@ import {
   type ReachabilitySampler,
 } from "./canvas/reachability";
 import {
+  draftPreviewOf,
   editorReducer,
   initialEditorState,
   mmMinToMmS,
   mmSToMmMin,
   planeAxisLetters,
+  type ArcMode,
+  type ArcDirection,
+  type EditorState,
   type EditorTool,
 } from "./editor";
 
@@ -45,14 +49,16 @@ const ROBOT: RobotModel = (() => {
 
 /**
  * The trajectory editor: the operator picks the Working Plane with its
- * fixed coordinate, draws Line Segments with two clicks on a millimetre
- * grid, sets the Home Point, and can undo or clear. Drawn geometry is
- * held as canonical Segments in the editor state (see `editor.ts`); the
- * canvas is a pure view over that state (ADR 0007). UI text is Russian
- * per GLOSSARY.md.
+ * fixed coordinate, draws Line, Arc (R or center, CW/CCW), and Point
+ * Segments on a millimetre grid — clicking or typing exact coordinates —
+ * sets the Home Point, edits per-Segment Feeds, and can undo or clear.
+ * Impossible Arcs are rejected at draw time with a readable message.
+ * Drawn geometry is held as canonical Segments in the editor state (see
+ * `editor.ts`); the canvas is a pure view over that state (ADR 0005,
+ * ADR 0007). UI text is Russian per GLOSSARY.md.
  */
-export function App() {
-  const [state, dispatch] = useReducer(editorReducer, initialEditorState);
+export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
+  const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const letters = planeAxisLetters(state.plane);
 
@@ -135,6 +141,8 @@ export function App() {
             {(
               [
                 { tool: "line" as EditorTool, label: "Отрезок", hint: "два клика" },
+                { tool: "arc" as EditorTool, label: "Дуга", hint: "2–3 клика" },
+                { tool: "point" as EditorTool, label: "Точка", hint: "один клик" },
                 { tool: "home" as EditorTool, label: "Исходная точка", hint: "один клик" },
               ]
             ).map(({ tool, label, hint }) => (
@@ -150,6 +158,61 @@ export function App() {
                 <span style={{ color: "#888" }}>({hint})</span>
               </label>
             ))}
+            {state.tool === "arc" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", paddingLeft: "1.5rem" }}>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcMode"
+                    value="radius"
+                    checked={state.arcMode === "radius"}
+                    onChange={() => dispatch({ type: "setArcMode", mode: "radius" as ArcMode })}
+                  />
+                  Радиус R <span style={{ color: "#888" }}>(2 клика)</span>
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcMode"
+                    value="center"
+                    checked={state.arcMode === "center"}
+                    onChange={() => dispatch({ type: "setArcMode", mode: "center" as ArcMode })}
+                  />
+                  Центр <span style={{ color: "#888" }}>(3 клика)</span>
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcDirection"
+                    value="CW"
+                    checked={state.arcDirection === "CW"}
+                    onChange={() => dispatch({ type: "setArcDirection", direction: "CW" as ArcDirection })}
+                  />
+                  по часовой (CW)
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcDirection"
+                    value="CCW"
+                    checked={state.arcDirection === "CCW"}
+                    onChange={() => dispatch({ type: "setArcDirection", direction: "CCW" as ArcDirection })}
+                  />
+                  против часовой (CCW)
+                </label>
+                {state.arcMode === "radius" && (
+                  <label style={rowStyle}>
+                    Радиус R, мм{" "}
+                    <NumberField
+                      value={state.arcRadiusMm}
+                      onCommit={(raw) => dispatch({ type: "setArcRadiusMm", raw })}
+                      step={1}
+                      min={0.001}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
             <label style={rowStyle}>
               Подача, мм/мин{" "}
               <NumberField
@@ -160,6 +223,11 @@ export function App() {
               />
             </label>
           </fieldset>
+
+          <NumericEntryFieldset
+            letters={letters}
+            onEntry={(u, v) => dispatch({ type: "numericEntry", u, v })}
+          />
 
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button type="button" onClick={() => dispatch({ type: "undo" })} disabled={state.segments.length === 0}>
@@ -174,7 +242,7 @@ export function App() {
             </button>
           </div>
           <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
-            Правая кнопка мыши отменяет незавершённый Отрезок.
+            Правая кнопка мыши отменяет незавершённый элемент.
           </p>
 
           <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -205,6 +273,16 @@ export function App() {
                     {violation !== null && (
                       <div style={{ color: VIOLATION_COLOR }}>{violationLabel(violation)}</div>
                     )}
+                    <label style={{ ...rowStyle, fontFamily: "system-ui, sans-serif", marginTop: "0.15rem" }}>
+                      Подача, мм/мин{" "}
+                      <NumberField
+                        key={`${i}:${segment.feed}`}
+                        value={mmSToMmMin(segment.feed)}
+                        onCommit={(raw) => dispatch({ type: "setSegmentFeedMmMin", index: i, raw })}
+                        step={60}
+                        min={1}
+                      />
+                    </label>
                   </li>
                 );
               })}
@@ -217,7 +295,7 @@ export function App() {
             plane={state.plane}
             segments={state.segments}
             home={state.home}
-            draftStart={state.draftStart}
+            draft={draftPreviewOf(state)}
             cursor={cursor}
             reachability={reachability}
             violations={violations}
@@ -236,6 +314,9 @@ export function App() {
               color: "#444",
             }}
           >
+            {state.error !== null && (
+              <div style={{ color: "#b42318", marginBottom: "0.2rem" }}>{state.error}</div>
+            )}
             {cursor === null
               ? "Курсор: —"
               : `Курсор: ${letters.u} ${formatMm(cursor.x)} · ${letters.v} ${formatMm(cursor.y)} · фикс. ${letters.w} ${formatMm(state.fixedMm)} мм`}
@@ -313,6 +394,43 @@ function NumberField(props: { readonly value: number; readonly onCommit: (raw: s
         props.onCommit(e.target.value);
       }}
     />
+  );
+}
+
+/** The fieldset look for the numeric coordinate entry. */
+function NumericEntryFieldset(props: { readonly letters: { u: string; v: string; w: string }; readonly onEntry: (u: number, v: number) => void }): JSX.Element {
+  const [uText, setUText] = useState("");
+  const [vText, setVText] = useState("");
+  const u = Number(uText);
+  const v = Number(vText);
+  const valid = uText.trim() !== "" && vText.trim() !== "" && Number.isFinite(u) && Number.isFinite(v);
+  const inputStyle = { width: 90, fontFamily: "monospace" } as const;
+  return (
+    <fieldset style={fieldsetStyle}>
+      <legend>Ввод координат</legend>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <label style={rowStyle}>
+          {props.letters.u}, мм <input type="number" value={uText} style={inputStyle} onChange={(e) => setUText(e.target.value)} />
+        </label>
+        <label style={rowStyle}>
+          {props.letters.v}, мм <input type="number" value={vText} style={inputStyle} onChange={(e) => setVText(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          disabled={!valid}
+          onClick={() => {
+            props.onEntry(u, v);
+            setUText("");
+            setVText("");
+          }}
+        >
+          Ввести точку
+        </button>
+      </div>
+      <p style={{ margin: 0, color: "#888", fontSize: "0.8rem" }}>
+        Ввод действует как клик по активному инструменту, но точно по координатам.
+      </p>
+    </fieldset>
   );
 }
 
