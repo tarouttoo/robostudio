@@ -26,8 +26,9 @@
  *   exponent noise, no `-0`); a chart never emits NaN/Infinity.
  */
 
-import type { RobotModel } from "../kinematics/robot-model";
-import type { MotionPlan } from "../motion/planner";
+import type { RobotModel, Vec3 } from "../kinematics/robot-model";
+import { vec3Distance } from "../kinematics/robot-model";
+import { CONTROL_STEP_MS, type MotionPlan } from "../motion/planner";
 
 /** The chart kinds the spec asks for, as stable identifiers. */
 export type ChartId =
@@ -115,15 +116,112 @@ export function renderCharts(plan: MotionPlan, model: RobotModel): readonly Rend
     ),
   });
 
+  /** The FK-reconstructed pen positions, one per plan row. */
+  const pen = plan.rows.map((row) => model.forwardKinematics(row.q));
+
   return [
     scalar("joint-positions", "Joint angles over time", "q", "q, rad"),
     scalar("joint-velocities", "Joint velocities over time", "qd", "qd, rad/s"),
     scalar("joint-accelerations", "Joint accelerations over time", "qdd", "qdd, rad/s²"),
     scalar("joint-jerks", "Joint jerks over time", "qddd", "qddd, rad/s³"),
-    ...CHART_IDS.filter(
-      (id) => id.startsWith("cartesian") || id.startsWith("end-effector") || id === "path-3d",
-    ).map((id) => ({ id, title: id, svg: scalarChartSvg(id, "t, ms", "", [], []) })),
+    {
+      id: "cartesian-path",
+      title: "Reconstructed cartesian path (top view)",
+      svg: pathChartSvg(
+        "Reconstructed cartesian path (top view)",
+        "x, mm",
+        "y, mm",
+        pen.map((p) => [p[0] as number, p[1] as number] as const),
+        "path",
+      ),
+    },
+    {
+      id: "end-effector-velocity",
+      title: "End-effector speed over time",
+      svg: scalarChartSvg(
+        "End-effector speed over time",
+        "t, ms",
+        "v, mm/s",
+        tMs,
+        [{ name: "speed", values: eeSpeeds(pen) }],
+      ),
+    },
+    {
+      id: "end-effector-acceleration",
+      title: "End-effector acceleration over time",
+      svg: scalarChartSvg(
+        "End-effector acceleration over time",
+        "t, ms",
+        "a, mm/s²",
+        tMs,
+        [{ name: "acceleration", values: eeAccelerations(pen) }],
+      ),
+    },
+    { id: "path-3d", title: "path-3d", svg: scalarChartSvg("path-3d", "t, ms", "", [], []) },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// End-effector kinematics from the reconstruction
+// ---------------------------------------------------------------------------
+
+/** The plan's row step in seconds — the reconstruction's sample rate. */
+const DT_S = CONTROL_STEP_MS / 1000;
+
+/**
+ * The end-effector speed at every plan row, in mm/s: the magnitude of
+ * the reconstructed path's velocity, central-differenced between rows
+ * (one-sided at the ends). Speed, not signed velocity: the plotted
+ * quantity is how fast the tool moves, and it is what the Feed sets.
+ */
+function eeSpeeds(points: readonly Vec3[]): readonly number[] {
+  const n = points.length;
+  if (n === 0) return [];
+  if (n === 1) return [0];
+  return points.map((_, i) => {
+    if (i === 0) return vec3Distance(points[1] as Vec3, points[0] as Vec3) / DT_S;
+    if (i === n - 1) return vec3Distance(points[i] as Vec3, points[i - 1] as Vec3) / DT_S;
+    return vec3Distance(points[i + 1] as Vec3, points[i - 1] as Vec3) / (2 * DT_S);
+  });
+}
+
+/** The componentwise sum `a + b`. */
+function add(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+/** The componentwise difference `a − b`. */
+function sub(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+/** The magnitude of a vector. */
+function length(v: Vec3): number {
+  return Math.hypot(v[0], v[1], v[2]);
+}
+
+/** The vector second difference `(p_next − 2·p + p_prev)` as a Vec3. */
+function secondDifference(prev: Vec3, p: Vec3, next: Vec3): Vec3 {
+  return sub(add(next, prev), [2 * p[0], 2 * p[1], 2 * p[2]]);
+}
+
+/**
+ * The end-effector acceleration magnitude at every plan row, in mm/s²:
+ * the second difference of the reconstructed positions over the row
+ * step (one-sided three-point windows at the ends).
+ */
+function eeAccelerations(points: readonly Vec3[]): readonly number[] {
+  const n = points.length;
+  if (n < 3) return points.map(() => 0);
+  return points.map((_, i) => {
+    const window =
+      i === 0
+        ? [points[0] as Vec3, points[1] as Vec3, points[2] as Vec3]
+        : i === n - 1
+          ? [points[n - 3] as Vec3, points[n - 2] as Vec3, points[n - 1] as Vec3]
+          : [points[i - 1] as Vec3, points[i] as Vec3, points[i + 1] as Vec3];
+    return length(secondDifference(window[0] as Vec3, window[1] as Vec3, window[2] as Vec3)) / (DT_S * DT_S);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +315,8 @@ interface SeriesInput {
  * Assembles a line chart of scalar series over a shared x axis (the
  * joint charts and the end-effector charts): frame, grid, labeled
  * ticks and axis titles, one legend entry per series (multi-series
- * only), and one polyline per series.
+ * only), and one polyline per series. The value axis spans the data
+ * exactly; the time axis spans `[0, max]`.
  */
 function scalarChartSvg(
   title: string,
@@ -234,7 +333,60 @@ function scalarChartSvg(
     MARGIN.top + PLOT_H,
     MARGIN.top,
   );
+  const pixelSeries = series.map((s) => ({
+    name: s.name,
+    points: s.values.map(
+      (v, k) => [xScale.toPx(xValues[k] as number), yScale.toPx(v)] as const,
+    ),
+  }));
+  return assembleChart(title, xScale, yScale, xTitle, yTitle, pixelSeries);
+}
 
+/**
+ * Assembles a path chart (the cartesian top view, and the projected
+ * 3D view): millimetre geometry drawn with a uniform scale on both
+ * axes — equal aspect, so equal millimetres always draw as equal
+ * pixels (ADR 0007's anti-distortion discipline, applied to charts).
+ * The limiting axis spans the plot area; the other is centered.
+ */
+function pathChartSvg(
+  title: string,
+  xTitle: string,
+  yTitle: string,
+  points: readonly (readonly [number, number])[],
+  seriesName: string,
+): string {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [xLo, xHi] = domain(Math.min(...xs, 0), Math.max(...xs, 0));
+  const [yLo, yHi] = domain(Math.min(...ys, 0), Math.max(...ys, 0));
+  // Uniform scale: both axes get the same mm→px factor, chosen so the
+  // limiting dimension fills the plot area.
+  const scale = Math.min(PLOT_W / (xHi - xLo), PLOT_H / (yHi - yLo));
+  const xCenter = (xLo + xHi) / 2;
+  const yCenter = (yLo + yHi) / 2;
+  const xScale = linearScale(xCenter - PLOT_W / scale / 2, xCenter + PLOT_W / scale / 2, MARGIN.left, MARGIN.left + PLOT_W);
+  const yScale = linearScale(yCenter - PLOT_H / scale / 2, yCenter + PLOT_H / scale / 2, MARGIN.top + PLOT_H, MARGIN.top);
+  const pixelSeries = [{
+    name: seriesName,
+    points: points.map(([x, y]) => [xScale.toPx(x), yScale.toPx(y)] as const),
+  }];
+  return assembleChart(title, xScale, yScale, xTitle, yTitle, pixelSeries);
+}
+
+/**
+ * Assembles the chart document: frame, grid, labeled ticks and axis
+ * titles, legend entries (multi-series only), and one polyline per
+ * series, over already-built pixel series.
+ */
+function assembleChart(
+  title: string,
+  xScale: Scale,
+  yScale: Scale,
+  xTitle: string,
+  yTitle: string,
+  series: readonly { name: string; points: readonly (readonly [number, number])[] }[],
+): string {
   const parts: string[] = [svgOpen(title)];
   parts.push(`<rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff"/>`);
   parts.push(text("chart-title", WIDTH / 2, 18, title, 'text-anchor="middle"'));
@@ -265,7 +417,7 @@ function scalarChartSvg(
 
   for (const [i, s] of series.entries()) {
     const color = PALETTE[i % PALETTE.length] as string;
-    const points = s.values.map((v, k) => `${fmtPx(xScale.toPx(xValues[k] as number))},${fmtPx(yScale.toPx(v))}`).join(" ");
+    const points = s.points.map(([px, py]) => `${fmtPx(px)},${fmtPx(py)}`).join(" ");
     parts.push(`<polyline class="series" data-series="${s.name}" points="${points}" fill="none" stroke="${color}" stroke-width="1.5"/>`);
   }
   parts.push("</svg>");

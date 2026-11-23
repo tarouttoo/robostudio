@@ -5,7 +5,7 @@ import { line, trajectory, type Trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
-import type { RobotModel } from "../kinematics/robot-model";
+import type { JointAngles, RobotModel } from "../kinematics/robot-model";
 import {
   CONTROL_STEP_MS,
   createPchipPlanner,
@@ -32,6 +32,25 @@ function defaultModel(): RobotModel {
   const model = result.registry.resolve("miko-mini");
   if (!model) throw new Error("model miko-mini was not resolved");
   return model;
+}
+
+/**
+ * A Robot Model whose FK is the identity: joint angle i lands at
+ * coordinate i, so handcrafted plans have millimetre-exact geometry.
+ */
+function identityModel(): RobotModel {
+  const joints = DEFAULT_MIKO_MINI_CONFIG.joints.map((joint) => ({
+    ...joint,
+    minRad: -1e6,
+    maxRad: 1e6,
+  }));
+  return {
+    id: "identity-test",
+    name: "Identity test model",
+    joints,
+    forwardKinematics: (angles) => [angles[0] as number, angles[1] as number, angles[2] as number],
+    inverseKinematics: (target) => ({ status: "ok", joints: [...target] as JointAngles }),
+  };
 }
 
 /** A line into the workspace followed by a quarter arc, both reachable. */
@@ -63,6 +82,45 @@ const X_AT_20_MM_S: MotionPlan = {
   ranges: oneRange(20, 0, 100),
   durationMs: 100,
 };
+
+/**
+ * A plan tracing an L in the identity model's XY plane: 2 mm along +X
+ * then 2 mm along +Y — two legs of equal drawn length for the
+ * equal-aspect checks (ADR 0007: drawn squares must not turn into
+ * rectangles, on screen or in charts).
+ */
+const L_SHAPED_PLAN: MotionPlan = {
+  rows: [
+    ...[0, 1, 2, 3, 4, 5].map((k) => row(k * CONTROL_STEP_MS, [0.02 * k * CONTROL_STEP_MS, 0, 0])),
+    ...[6, 7, 8, 9, 10, 11].map((k) =>
+      row(k * CONTROL_STEP_MS, [2, 0.02 * (k * CONTROL_STEP_MS - 100), 0]),
+    ),
+  ],
+  ranges: oneRange(20, 0, 220),
+  durationMs: 220,
+};
+
+/**
+ * A plan that moves at 20 mm/s for 60 ms, then at 10 mm/s — the
+ * velocity step of 10 mm/s across one 20 ms row gap pins the plotted
+ * acceleration magnitude (|Δv|/Δt = 500 mm/s²).
+ */
+const TWO_PHASE_PLAN: MotionPlan = {
+  rows: [
+    [0, 20, 40, 60].map((t) => row(t, [0.02 * t, 0, 0])),
+    [80, 100].map((t) => row(t, [1.2 + 0.01 * (t - 60), 0, 0])),
+  ].flat(),
+  ranges: oneRange(20, 0, 100),
+  durationMs: 100,
+};
+
+/** The 100×100 mm square the golden geometry tests guard (ADR 0007). */
+const SQUARE: Trajectory = trajectory(vec3(60, -50, 60), [
+  line({ start: vec3(60, -50, 60), end: vec3(160, -50, 60), feed: 20 }),
+  line({ start: vec3(160, -50, 60), end: vec3(160, 50, 60), feed: 20 }),
+  line({ start: vec3(160, 50, 60), end: vec3(60, 50, 60), feed: 20 }),
+  line({ start: vec3(60, 50, 60), end: vec3(60, -50, 60), feed: 20 }),
+]);
 
 /** A one-row plan: the degenerate case every chart must survive. */
 const ONE_ROW_PLAN: MotionPlan = {
@@ -111,6 +169,17 @@ function fmt(v: number): string {
 /** min/max of one joint's value across the plan rows. */
 function extent(values: readonly number[]): readonly [number, number] {
   return [Math.min(...values), Math.max(...values)];
+}
+
+/** Total polyline length of the first `count` plotted points. */
+function drawnLength(points: readonly (readonly [number, number])[], count: number): number {
+  let total = 0;
+  for (let i = 1; i < count; i++) {
+    const [x0, y0] = points[i - 1] as readonly [number, number];
+    const [x1, y1] = points[i] as readonly [number, number];
+    total += Math.hypot(x1 - x0, y1 - y0);
+  }
+  return total;
 }
 
 describe("chart seam", () => {
@@ -217,4 +286,75 @@ describe("joint charts", () => {
       expect(yTicks).toContain(fmt(max));
     });
   }
+});
+
+describe("cartesian path chart", () => {
+  const model = defaultModel();
+  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+
+  it("reconstructs the pen path through FK, one point per row, in mm", () => {
+    const svg = chartById(renderCharts(plan, model), "cartesian-path").svg;
+
+    expect(texts(svg, "chart-title")).toEqual(["Reconstructed cartesian path (top view)"]);
+    expect(texts(svg, "axis-title-x")).toEqual(["x, mm"]);
+    expect(texts(svg, "axis-title-y")).toEqual(["y, mm"]);
+    const drawn = series(svg);
+    expect(drawn.map((s) => s.name)).toEqual(["path"]);
+    expect(drawn[0]!.points).toHaveLength(plan.rows.length);
+    // The plotted geometry stays inside the plot frame.
+    for (const [px, py] of drawn[0]!.points) {
+      expect(px).toBeGreaterThanOrEqual(64);
+      expect(px).toBeLessThanOrEqual(616);
+      expect(py).toBeGreaterThanOrEqual(48);
+      expect(py).toBeLessThanOrEqual(354);
+    }
+  });
+
+  it("draws the axes with equal scale: equal millimetres, equal pixels", () => {
+    const svg = chartById(renderCharts(L_SHAPED_PLAN, identityModel()), "cartesian-path").svg;
+    const points = series(svg)[0]!.points;
+    // Two legs of 2 mm each: their drawn lengths must agree.
+    const legX = drawnLength(points, 6);
+    const legY = drawnLength(points.slice(5), 6);
+    expect(Math.abs(legY - legX) / legX).toBeLessThan(0.01);
+  });
+
+  it("draws the golden square as a square, not a rectangle (ADR 0007)", () => {
+    const square = runPipeline({ trajectory: SQUARE, model, planner: createPchipPlanner(model) });
+    const points = series(chartById(renderCharts(square.plan, model), "cartesian-path").svg)[0]!.points;
+    const px = points.map(([x]) => x);
+    const py = points.map(([, y]) => y);
+    const widthPx = Math.max(...px) - Math.min(...px);
+    const heightPx = Math.max(...py) - Math.min(...py);
+    // Reconstruction error is bounded by 0.5 mm on a 100 mm side (0.5%);
+    // 1.5% leaves room for grid rounding without hiding distortion.
+    expect(Math.abs(widthPx - heightPx) / Math.min(widthPx, heightPx)).toBeLessThan(0.015);
+  });
+});
+
+describe("end-effector charts", () => {
+  it("plots the pen speed over time in mm/s, matching the traverse rate", () => {
+    const svg = chartById(renderCharts(X_AT_20_MM_S, identityModel()), "end-effector-velocity").svg;
+
+    expect(texts(svg, "chart-title")).toEqual(["End-effector speed over time"]);
+    expect(texts(svg, "axis-title-x")).toEqual(["t, ms"]);
+    expect(texts(svg, "axis-title-y")).toEqual(["v, mm/s"]);
+    const drawn = series(svg);
+    expect(drawn.map((s) => s.name)).toEqual(["speed"]);
+    expect(drawn[0]!.points).toHaveLength(X_AT_20_MM_S.rows.length);
+    // Constant 20 mm/s motion: the value axis must expose that rate.
+    expect(texts(svg, "tick-y")).toContain("20");
+  });
+
+  it("plots the pen acceleration over time in mm/s², spiking at velocity steps", () => {
+    const svg = chartById(renderCharts(TWO_PHASE_PLAN, identityModel()), "end-effector-acceleration").svg;
+
+    expect(texts(svg, "chart-title")).toEqual(["End-effector acceleration over time"]);
+    expect(texts(svg, "axis-title-y")).toEqual(["a, mm/s²"]);
+    expect(series(svg)[0]!.points).toHaveLength(TWO_PHASE_PLAN.rows.length);
+    // The 20→10 mm/s step across one 20 ms row gap is |Δv|/Δt = 500 mm/s².
+    const yTicks = texts(svg, "tick-y");
+    expect(yTicks).toContain("0");
+    expect(yTicks).toContain("500");
+  });
 });
