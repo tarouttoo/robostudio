@@ -46,6 +46,11 @@ here.
   checking (Проверка коллизий)** is a reserved stage, deliberately empty
   in v1.
 - **Exporter (Экспортёр)** — a named output writer.
+- **Chart (График)** — one rendered plot of the Motion Plan: joint
+  angles/velocities/accelerations/jerks over time, the reconstructed
+  cartesian path, end-effector velocity and acceleration, or the 3D
+  path view. Charts render headless as SVG in the export layer
+  (ADR `0013`); path charts are equal-aspect (ADR `0007`).
 - **Robot CSV** — the Exporter output the real robot consumes:
   `t,q1,q2,q3`, milliseconds and radians, 20 ms row step. Format is a
   contract pinned by tests (ADR `0006`).
