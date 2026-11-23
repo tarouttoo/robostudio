@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -81,6 +81,35 @@ describe("export IPC handlers", () => {
     expect(result.kind).toBe("error");
     expect(await readdir(dir)).toEqual([]);
     await expect(stat(missing)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("a failure while the bytes are produced leaves the previous export untouched", async () => {
+    // Re-export into the same folder is the primary operator loop. The
+    // second staging file cannot be written (its path is taken by a
+    // directory), which — before the staged writes — left a fresh
+    // Robot CSV beside the stale RViz CSV: two files describing
+    // different runs, and the Robot CSV feeds the controller (ADR
+    // 0006). The staged writes keep the old pair byte-identical.
+    await writeFile(join(dir, ROBOT_CSV_FILE), "old robot", "utf8");
+    await writeFile(join(dir, RVIZ_CSV_FILE), "old rviz", "utf8");
+    await mkdir(join(dir, `${RVIZ_CSV_FILE}.partial`));
+    const result = await exportCsvs(fakeDialogs(dir), "new robot", "new rviz");
+    if (result.kind !== "error") throw new Error(`expected error, got ${result.kind}`);
+    expect(result.error.tag).toBe("IoFailed");
+    expect(await readFile(join(dir, ROBOT_CSV_FILE), "utf8")).toBe("old robot");
+    expect(await readFile(join(dir, RVIZ_CSV_FILE), "utf8")).toBe("old rviz");
+    // Nothing new: the staging directory (never removed recursively —
+    // it could hold the operator's own files) is all that remains.
+    expect((await readdir(dir)).sort()).toEqual([ROBOT_CSV_FILE, `${RVIZ_CSV_FILE}.partial`, RVIZ_CSV_FILE].sort());
+  });
+
+  it("re-exporting into the same folder replaces both files and leaves no staging files", async () => {
+    await exportCsvs(fakeDialogs(dir), "one robot", "one rviz");
+    const result = await exportCsvs(fakeDialogs(dir), "two robot", "two rviz");
+    if (result.kind !== "exported") throw new Error(`expected exported, got ${result.kind}`);
+    expect(await readFile(join(dir, ROBOT_CSV_FILE), "utf8")).toBe("two robot");
+    expect(await readFile(join(dir, RVIZ_CSV_FILE), "utf8")).toBe("two rviz");
+    expect((await readdir(dir)).sort()).toEqual([ROBOT_CSV_FILE, RVIZ_CSV_FILE].sort());
   });
 
   it("every outcome satisfies the renderer-side bridge contract (ui/bridge.ts)", async () => {

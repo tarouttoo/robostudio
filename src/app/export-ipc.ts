@@ -13,7 +13,7 @@
  * runs in tests against a scripted dialog and the real file system.
  */
 
-import { writeFile } from "node:fs/promises";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { BridgeError } from "../project";
@@ -23,6 +23,9 @@ export const ROBOT_CSV_FILE = "robot.csv";
 
 /** The file name the RViz CSV lands under in the chosen folder. */
 export const RVIZ_CSV_FILE = "rviz.csv";
+
+/** Suffix of the staging files the bytes are written to before the final rename. */
+const STAGING_SUFFIX = ".partial";
 
 /**
  * The slice of the Electron dialog API the export handler uses. A
@@ -49,9 +52,9 @@ export type ExportCsvsResult =
 
 /**
  * Exports the two generated CSV files: the folder dialog picks the
- * destination, the bytes are written as UTF-8 (`robot.csv`,
- * `rviz.csv`). Cancels cleanly; write failures come back as a named
- * `IoFailed` error record naming the folder.
+ * destination, the bytes land as UTF-8 (`robot.csv`, `rviz.csv`).
+ * Cancels cleanly; failures come back as a named `IoFailed` error
+ * record naming the folder.
  */
 export async function exportCsvs(
   dialogs: ExportDialogs,
@@ -62,10 +65,27 @@ export async function exportCsvs(
   if (choice.canceled || choice.filePaths.length === 0) return { kind: "canceled" };
   const folder = choice.filePaths[0] as string;
   const files = [join(folder, ROBOT_CSV_FILE), join(folder, RVIZ_CSV_FILE)];
+  // Both files are staged as sibling `.partial` files and only then
+  // renamed onto their final names (a rename replaces the target on
+  // every supported platform). A failure while the bytes are produced
+  // — disk full, no permission, the folder gone — therefore leaves the
+  // folder exactly as it was: a half-updated CSV pair would be worse
+  // than no export, because both files describe one and the same run
+  // and the Robot CSV feeds the controller (ADR 0006). A crash can
+  // still strand a `.partial` file; the next export overwrites it. A
+  // failure at the second rename (a target another program holds open)
+  // can still leave the first file replaced; the error names the
+  // folder either way. Staged cleanup never recurses, so a staging
+  // path occupied by a directory of the operator's is left alone.
+  const staging = files.map((file) => `${file}${STAGING_SUFFIX}`);
   try {
-    await writeFile(files[0] as string, robotCsv, "utf8");
-    await writeFile(files[1] as string, rvizCsv, "utf8");
+    await writeFile(staging[0] as string, robotCsv, "utf8");
+    await writeFile(staging[1] as string, rvizCsv, "utf8");
+    await rename(staging[0] as string, files[0] as string);
+    await rename(staging[1] as string, files[1] as string);
   } catch (cause) {
+    // Best effort: staged files never belong in the operator's folder.
+    await Promise.allSettled(staging.map((file) => rm(file, { force: true })));
     const reason = cause instanceof Error ? cause.message : String(cause);
     return {
       kind: "error",
