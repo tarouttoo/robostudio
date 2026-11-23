@@ -358,3 +358,56 @@ describe("end-effector charts", () => {
     expect(yTicks).toContain("500");
   });
 });
+
+describe("3D path view", () => {
+  /** A plan tracing three 2 mm legs: +X, then +Y, then +Z (identity model). */
+  const XYZ_PLAN: MotionPlan = {
+    rows: [
+      ...[0, 1, 2, 3, 4, 5].map((k) => row(k * CONTROL_STEP_MS, [0.02 * k * CONTROL_STEP_MS, 0, 0])),
+      ...[6, 7, 8, 9, 10, 11].map((k) =>
+        row(k * CONTROL_STEP_MS, [2, 0.02 * (k * CONTROL_STEP_MS - 120), 0]),
+      ),
+      ...[12, 13, 14, 15, 16, 17].map((k) =>
+        row(k * CONTROL_STEP_MS, [2, 2, 0.02 * (k * CONTROL_STEP_MS - 240)]),
+      ),
+    ],
+    ranges: oneRange(20, 0, 340),
+    durationMs: 340,
+  };
+
+  it("projects the planned path isometrically with equal-aspect axes", () => {
+    const model = identityModel();
+    const svg = chartById(renderCharts(XYZ_PLAN, model), "path-3d").svg;
+
+    expect(texts(svg, "chart-title")).toEqual(["Planned path in 3D (isometric)"]);
+    const drawn = series(svg);
+    expect(drawn.map((s) => s.name)).toEqual(["path-3d"]);
+    expect(drawn[0]!.points).toHaveLength(XYZ_PLAN.rows.length);
+    // Isometric projection with equal aspect: a 2 mm leg along each of
+    // X, Y, Z draws with the same pixel length.
+    const points = drawn[0]!.points;
+    const legX = drawnLength(points, 6);
+    // The Y and Z legs start one row after the previous leg's last row
+    // (the plan holds the corner), so each slice spans 6 segments.
+    const legY = drawnLength(points.slice(5), 7);
+    const legZ = drawnLength(points.slice(11), 7);
+    expect(Math.abs(legY - legX) / legX).toBeLessThan(0.01);
+    expect(Math.abs(legZ - legX) / legX).toBeLessThan(0.01);
+  });
+
+  it("annotates the axes and states the units", () => {
+    const model = defaultModel();
+    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+    const svg = chartById(renderCharts(plan, model), "path-3d").svg;
+
+    // The bounding wireframe grounds the motion in space.
+    expect(svg).toMatch(/class="axes-box"/);
+    // Each world axis is labeled at its box edge.
+    const labels = texts(svg, "axis-label-3d");
+    for (const axis of ["X", "Y", "Z"]) expect(labels).toContain(axis);
+    // Units live in the caption: the projection mixes axes, so there
+    // are no per-screen-axis tick labels to carry them.
+    expect(texts(svg, "axis-caption").join(" ")).toContain("mm");
+    expect(texts(svg, "axis-caption").join(" ")).toContain("equal-aspect");
+  });
+});

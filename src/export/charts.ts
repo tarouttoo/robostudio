@@ -157,7 +157,11 @@ export function renderCharts(plan: MotionPlan, model: RobotModel): readonly Rend
         [{ name: "acceleration", values: eeAccelerations(pen) }],
       ),
     },
-    { id: "path-3d", title: "path-3d", svg: scalarChartSvg("path-3d", "t, ms", "", [], []) },
+    {
+      id: "path-3d",
+      title: "Planned path in 3D (isometric)",
+      svg: path3dChartSvg("Planned path in 3D (isometric)", pen),
+    },
   ];
 }
 
@@ -372,6 +376,107 @@ function pathChartSvg(
     points: points.map(([x, y]) => [xScale.toPx(x), yScale.toPx(y)] as const),
   }];
   return assembleChart(title, xScale, yScale, xTitle, yTitle, pixelSeries);
+}
+
+/** cos 30° — the isometric ground-axis tilt. */
+const COS_30 = Math.cos(Math.PI / 6);
+/** sin 30° — the isometric ground-axis rise. */
+const SIN_30 = 0.5;
+
+/**
+ * The isometric projection of a model-frame point (mm) onto the chart
+ * plane: X and Y recede along the ground axes (±30° from horizontal),
+ * Z stays vertical. All three unit axes project to length exactly 1,
+ * so with the uniform plot scale the view is equal-aspect by
+ * construction — a cube draws as a proper isometric cube.
+ */
+function projectIsometric(p: Vec3): readonly [number, number] {
+  const right = (p[0] - p[1]) * COS_30;
+  const up = p[2] + (p[0] + p[1]) * SIN_30;
+  return [right, up];
+}
+
+/** The bounding box `[min, max]` of one coordinate across the points. */
+function extentOf(values: readonly number[]): readonly [number, number] {
+  return [Math.min(...values), Math.max(...values)];
+}
+
+/**
+ * Assembles the 3D path view: the planned path projected isometrically
+ * with equal-aspect axes, inside the projected bounding-box wireframe
+ * of the motion, with each world axis labeled at its box edge. The
+ * projection mixes world axes, so there are no per-screen-axis tick
+ * labels; the units live in the caption (mm).
+ */
+function path3dChartSvg(title: string, points: readonly Vec3[]): string {
+  const projected = points.map(projectIsometric);
+  const xs = projected.map(([x]) => x);
+  const ys = projected.map(([, y]) => y);
+  const [xLo, xHi] = extentOf(xs);
+  const [yLo, yHi] = extentOf(ys);
+  const scale = Math.min(PLOT_W / Math.max(xHi - xLo, 1e-9), PLOT_H / Math.max(yHi - yLo, 1e-9));
+  const xCenter = (xLo + xHi) / 2;
+  const yCenter = (yLo + yHi) / 2;
+  const xScale = linearScale(xCenter - PLOT_W / scale / 2, xCenter + PLOT_W / scale / 2, MARGIN.left, MARGIN.left + PLOT_W);
+  const yScale = linearScale(yCenter - PLOT_H / scale / 2, yCenter + PLOT_H / scale / 2, MARGIN.top + PLOT_H, MARGIN.top);
+
+  const parts: string[] = [svgOpen(title)];
+  parts.push(`<rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff"/>`);
+  parts.push(text("chart-title", WIDTH / 2, 18, title, 'text-anchor="middle"'));
+  parts.push(`<rect class="plot-frame" x="${MARGIN.left}" y="${MARGIN.top}" width="${PLOT_W}" height="${PLOT_H}" fill="none" stroke="#333333"/>`);
+
+  // The bounding-box wireframe: eight corners, twelve edges, projected.
+  const [x0, x1] = extentOf(points.map((p) => p[0]));
+  const [y0, y1] = extentOf(points.map((p) => p[1]));
+  const [z0, z1] = extentOf(points.map((p) => p[2]));
+  const corner = (bits: number): Vec3 => [bits & 1 ? x1 : x0, bits & 2 ? y1 : y0, bits & 4 ? z1 : z0];
+  const toPx = (p: Vec3): readonly [number, number] => {
+    const [mx, my] = projectIsometric(p);
+    return [xScale.toPx(mx), yScale.toPx(my)];
+  };
+  const boxCenter = toPx([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
+  const edges: readonly (readonly [number, number])[] = [
+    [0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6], [4, 5], [4, 6], [3, 7], [5, 7], [6, 7],
+  ];
+  const boxD = edges
+    .map(([a, b]) => {
+      const [ax, ay] = toPx(corner(a));
+      const [bx, by] = toPx(corner(b));
+      return `M ${fmtPx(ax)} ${fmtPx(ay)} L ${fmtPx(bx)} ${fmtPx(by)}`;
+    })
+    .join(" ");
+  parts.push(`<path class="axes-box" d="${boxD}" fill="none" stroke="#bbbbbb"/>`);
+
+  // Labels for the world axes at the midpoints of the three edges that
+  // emanate from the (min, min, min) corner, nudged away from the box.
+  const axisEdges: readonly (readonly [string, Vec3, Vec3])[] = [
+    ["X", corner(0), corner(1)],
+    ["Y", corner(0), corner(2)],
+    ["Z", corner(0), corner(4)],
+  ];
+  for (const [axis, from, to] of axisEdges) {
+    const mid: Vec3 = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2];
+    const [mx, my] = toPx(mid);
+    const dx = mx - boxCenter[0];
+    const dy = my - boxCenter[1];
+    const d = Math.hypot(dx, dy);
+    const [ox, oy] = d > 1e-9 ? [(dx / d) * 12, (dy / d) * 12] : [0, 0];
+    parts.push(text("axis-label-3d", mx + ox, my + oy + 4, axis, 'text-anchor="middle"'));
+  }
+
+  const pathPoints = projected.map(([mx, my]) => `${fmtPx(xScale.toPx(mx))},${fmtPx(yScale.toPx(my))}`).join(" ");
+  parts.push(`<polyline class="series" data-series="path-3d" points="${pathPoints}" fill="none" stroke="${PALETTE[0]}" stroke-width="1.5"/>`);
+  parts.push(
+    text(
+      "axis-caption",
+      MARGIN.left + PLOT_W / 2,
+      HEIGHT - 8,
+      "X, Y, Z in mm; equal-aspect isometric projection",
+      'text-anchor="middle"',
+    ),
+  );
+  parts.push("</svg>");
+  return parts.join("");
 }
 
 /**
