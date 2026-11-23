@@ -73,4 +73,15 @@ describe("app shell", () => {
     expect(html).toContain("Ввод координат");
     expect(html).toContain("Ввести точку");
   });
+
+  it("renders the generation section with generate and export actions", () => {
+    const html = renderToString(<App />);
+    expect(html).toContain("Генерация");
+    expect(html).toContain("Сгенерировать");
+    expect(html).toContain("Экспорт CSV");
+    // Export is locked until a successful generation exists.
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Экспорт CSV/);
+    // Generate starts unlocked.
+    expect(html).toMatch(/<button[^>]*>[^<]*Сгенерировать/);
+  });
 });

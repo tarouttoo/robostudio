@@ -4,14 +4,17 @@ import { APP_NAME, APP_VERSION } from "../core/version";
 
 /**
  * The preload bridge: the only surface the sandboxed renderer can reach
- * the main process through. Project File save/open go through the main
- * process — the dialogs and the file system live there; the renderer
- * only exchanges JSON text and result records (ADR 0003). The handlers
- * never throw: they resolve with `{kind: ...}` records.
+ * the main process through. Project File save/open and the generated
+ * CSV export go through the main process — the dialogs and the file
+ * system live there; the renderer only exchanges JSON/CSV text and
+ * result records (ADR 0003). The handlers never throw: they resolve
+ * with `{kind: ...}` records.
  */
 contextBridge.exposeInMainWorld("robostudio", {
   appName: APP_NAME,
   appVersion: APP_VERSION,
   saveProject: (json: string) => ipcRenderer.invoke("project:save", json),
   openProject: () => ipcRenderer.invoke("project:open"),
+  exportCsvs: (robotCsv: string, rvizCsv: string) =>
+    ipcRenderer.invoke("export:csvs", robotCsv, rvizCsv),
 });
