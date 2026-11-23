@@ -1,3 +1,6 @@
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { arcFromCenter } from "../core/arc";
@@ -225,6 +228,21 @@ describe("chart seam", () => {
 
   it("is a pure function of the plan and model", () => {
     expect(renderCharts(plan, model)).toEqual(renderCharts(plan, model));
+  });
+
+  it("writes to files headless: every rendered document lands on disk as valid SVG", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "charts-"));
+    try {
+      for (const chart of renderCharts(plan, model)) {
+        await writeFile(join(dir, `${chart.id}.svg`), chart.svg, "utf8");
+      }
+      const names = await readdir(dir);
+      expect(names).toHaveLength(CHART_IDS.length);
+      const first = await readFile(join(dir, "joint-positions.svg"), "utf8");
+      expect(first.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

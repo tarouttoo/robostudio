@@ -39,7 +39,8 @@ src/
 ├── kinematics/  # RobotModel implementations: chains, limits, FK/IK
 ├── motion/      # Planner implementations: discretization → Motion Plan
 ├── export/      # Headless pipeline (validation stages) + Exporters:
-│                #   Robot CSV, RViz CSV (ADR 0006, 0012)
+│                #   Robot CSV, RViz CSV (ADR 0006, 0012) + headless
+│                #   SVG charts from the Motion Plan (ADR 0013)
 ├── project/     # versioned Project File schema + (de)serialization
 ├── app/         # Electron main process: window lifecycle, preload bridge
 └── ui/          # React renderer (Russian UI text per GLOSSARY.md)
