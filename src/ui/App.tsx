@@ -23,6 +23,7 @@ import {
   runGeneration,
   type GenerationOutcome,
 } from "./generation";
+import { ChartsView, chartsOf } from "./ChartsView";
 import { MIKO_MINI } from "./robot";
 import {
   draftPreviewOf,
@@ -38,6 +39,9 @@ import {
   type EditorTool,
 } from "./editor";
 
+/** The main area's view: the drawing canvas, or the charts of the last generation. */
+type MainView = "drawing" | "charts";
+
 /**
  * The trajectory editor: the operator picks the Working Plane with its
  * fixed coordinate, draws Line, Arc (R or center, CW/CCW), and Point
@@ -50,7 +54,10 @@ import {
  * headless pipeline (`runGeneration`) and the validation stage log is
  * shown; a successful generation unlocks «Экспорт CSV», which writes
  * the Robot CSV and RViz CSV into an operator-picked folder through the
- * main process. UI text is Russian per GLOSSARY.md.
+ * main process, and switches the main area to «Графики» — every chart
+ * the headless renderer produced from the new Motion Plan (ADR 0013,
+ * `ChartsView.tsx`). Regeneration replaces those charts with the new
+ * plan's data. UI text is Russian per GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
@@ -61,12 +68,18 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [generation, setGeneration] = useState<GenerationOutcome | null>(null);
   /** Status of the last CSV export; the flag, not the text, decides the colour. */
   const [exportMessage, setExportMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
+  /** Which main-area view is shown: the drawing canvas or the charts. */
+  const [view, setView] = useState<MainView>("drawing");
+  /** The charts of the last successful generation, through the headless seam (ADR 0013). */
+  const charts = useMemo(() => chartsOf(generation, MIKO_MINI), [generation]);
   const letters = planeAxisLetters(state.plane);
 
-  /** Runs generation on the drawn Trajectory and shows the log. */
+  /** Runs generation on the drawn Trajectory and shows the log; success opens the refreshed charts. */
   const handleGenerate = (): void => {
-    setGeneration(runGeneration(state, MIKO_MINI));
+    const outcome = runGeneration(state, MIKO_MINI);
+    setGeneration(outcome);
     setExportMessage(null);
+    if (outcome.kind === "ok") setView("charts");
   };
 
   /** Writes the generated Robot CSV and RViz CSV into a picked folder. */
@@ -421,36 +434,64 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
         </aside>
 
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-          <Canvas
-            plane={state.plane}
-            segments={state.segments}
-            home={state.home}
-            draft={draftPreviewOf(state)}
-            cursor={cursor}
-            reachability={reachability}
-            violations={violations}
-            draftViolation={draftViolation}
-            homeStatus={homeStatus}
-            onPlaneClick={(uv) => dispatch({ type: "canvasClick", u: uv.x, v: uv.y })}
-            onCursorMove={setCursor}
-            onDraftCancel={() => dispatch({ type: "cancelDraft" })}
-          />
           <div
-            style={{
-              borderTop: "1px solid #ddd",
-              padding: "0.4rem 1rem",
-              fontFamily: "monospace",
-              fontSize: "0.9rem",
-              color: "#444",
-            }}
+            style={{ display: "flex", gap: "0.25rem", padding: "0.3rem 1rem", borderBottom: "1px solid #ddd", alignItems: "center" }}
           >
-            {state.error !== null && (
-              <div style={{ color: "#b42318", marginBottom: "0.2rem" }}>{state.error}</div>
-            )}
-            {cursor === null
-              ? "Курсор: —"
-              : `Курсор: ${letters.u} ${formatMm(cursor.x)} · ${letters.v} ${formatMm(cursor.y)} · фикс. ${letters.w} ${formatMm(state.fixedMm)} мм`}
+            <button
+              type="button"
+              onClick={() => setView("drawing")}
+              aria-pressed={view === "drawing"}
+              style={view === "drawing" ? activeTabStyle : tabStyle}
+            >
+              Чертёж
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("charts")}
+              disabled={charts === null}
+              aria-pressed={view === "charts"}
+              title={charts === null ? "Графики появятся после успешной генерации" : undefined}
+              style={view === "charts" ? activeTabStyle : tabStyle}
+            >
+              Графики
+            </button>
           </div>
+          {view === "charts" && charts !== null ? (
+            <ChartsView charts={charts} />
+          ) : (
+            <>
+              <Canvas
+                plane={state.plane}
+                segments={state.segments}
+                home={state.home}
+                draft={draftPreviewOf(state)}
+                cursor={cursor}
+                reachability={reachability}
+                violations={violations}
+                draftViolation={draftViolation}
+                homeStatus={homeStatus}
+                onPlaneClick={(uv) => dispatch({ type: "canvasClick", u: uv.x, v: uv.y })}
+                onCursorMove={setCursor}
+                onDraftCancel={() => dispatch({ type: "cancelDraft" })}
+              />
+              <div
+                style={{
+                  borderTop: "1px solid #ddd",
+                  padding: "0.4rem 1rem",
+                  fontFamily: "monospace",
+                  fontSize: "0.9rem",
+                  color: "#444",
+                }}
+              >
+                {state.error !== null && (
+                  <div style={{ color: "#b42318", marginBottom: "0.2rem" }}>{state.error}</div>
+                )}
+                {cursor === null
+                  ? "Курсор: —"
+                  : `Курсор: ${letters.u} ${formatMm(cursor.x)} · ${letters.v} ${formatMm(cursor.y)} · фикс. ${letters.w} ${formatMm(state.fixedMm)} мм`}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </main>
@@ -459,6 +500,12 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
 
 /** Fieldset look for the tool panels. */
 const fieldsetStyle = { border: "1px solid #ddd", borderRadius: 4, margin: 0, padding: "0.5rem", display: "flex", flexDirection: "column", gap: "0.25rem" } as const;
+
+/** Look of an inactive main-area view tab. */
+const tabStyle = { padding: "0.2rem 0.75rem", border: "1px solid #ddd", borderRadius: 4, background: "#fff", color: "#444" } as const;
+
+/** Look of the active main-area view tab. */
+const activeTabStyle = { ...tabStyle, background: "#eef3fb", borderColor: "#7a9cc4", color: "#1a1a1a" } as const;
 
 /** One labelled row inside a fieldset. */
 const rowStyle = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;

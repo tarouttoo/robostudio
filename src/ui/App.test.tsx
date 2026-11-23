@@ -84,4 +84,16 @@ describe("app shell", () => {
     // Generate starts unlocked.
     expect(html).toMatch(/<button[^>]*>[^<]*Сгенерировать/);
   });
+
+  it("offers the charts view behind the Графики tab, locked until a generation", () => {
+    const html = renderToString(<App />);
+    // The main area starts on the drawing view.
+    expect(html).toContain("Чертёж");
+    expect(html).toContain("Графики");
+    // The charts tab is locked until a successful generation exists.
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Графики/);
+    // The drawing tab starts unlocked and active.
+    expect(html).toMatch(/<button[^>]*>[^<]*Чертёж/);
+    expect(html).toContain("<canvas");
+  });
 });
