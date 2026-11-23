@@ -1,29 +1,67 @@
-import { useReducer, useState } from "react";
+import { useMemo, useReducer, useState, type JSX } from "react";
 
-import { type Segment, type Vec2, type Vec3 } from "../core";
+import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
 import { serializeProject } from "../project";
 import { APP_NAME, APP_VERSION } from "../core/version";
 import { projectBridge } from "./bridge";
-import { Canvas } from "./Canvas";
 import {
+  DEFAULT_MIKO_MINI_CONFIG,
+  createMiKoMiniModel,
+} from "../kinematics/miko-mini";
+import {
+  checkPointReachability,
+  checkSegmentReachability,
+  type PointReachability,
+  type ReachabilityViolation,
+} from "../kinematics/reachability";
+import type { RobotModel } from "../kinematics/robot-model";
+import { Canvas } from "./Canvas";
+import { VIOLATION_COLOR } from "./canvas/draw";
+import {
+  REACHABILITY_COLORS,
+  createReachabilitySampler,
+  type ReachabilitySampler,
+} from "./canvas/reachability";
+import {
+  draftPreviewOf,
   editorReducer,
   initialEditorState,
+  mmMinToMmS,
   mmSToMmMin,
   planeAxisLetters,
   projectContentOf,
+  type ArcMode,
+  type ArcDirection,
+  type EditorState,
   type EditorTool,
 } from "./editor";
 
 /**
- * The trajectory editor: the operator picks the Working Plane with its
- * fixed coordinate, draws Line Segments with two clicks on a millimetre
- * grid, sets the Home Point, and can undo or clear. Drawn geometry is
- * held as canonical Segments in the editor state (see `editor.ts`); the
- * canvas is a pure view over that state (ADR 0007). UI text is Russian
- * per GLOSSARY.md.
+ * The v1 Robot Model every drawing view is checked against: the
+ * default MiKo-mini configuration (ADR 0008). Built once at module
+ * load; the shipped configuration is validated by the kinematics tests,
+ * so a failure here is a programming error, not a runtime condition.
  */
-export function App() {
-  const [state, dispatch] = useReducer(editorReducer, initialEditorState);
+const ROBOT: RobotModel = (() => {
+  const built = createMiKoMiniModel(DEFAULT_MIKO_MINI_CONFIG);
+  if (built.status !== "ok") {
+    throw new Error(`invalid default MiKo-mini config: ${built.problems.join("; ")}`);
+  }
+  return built.model;
+})();
+
+/**
+ * The trajectory editor: the operator picks the Working Plane with its
+ * fixed coordinate, draws Line, Arc (R or center, CW/CCW), and Point
+ * Segments on a millimetre grid — clicking or typing exact coordinates —
+ * sets the Home Point, edits per-Segment Feeds, and can undo or clear.
+ * Impossible Arcs are rejected at draw time with a readable message.
+ * Drawn geometry is held as canonical Segments in the editor state (see
+ * `editor.ts`); the canvas is a pure view over that state (ADR 0005,
+ * ADR 0007). UI text is Russian per GLOSSARY.md.
+ */
+export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
+  const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const letters = planeAxisLetters(state.plane);
@@ -56,6 +94,31 @@ export function App() {
     } else if (result.kind === "canceled") setProjectMessage(null);
     else setProjectMessage(result.error.message);
   };
+
+  // Live Reachability: a fresh map per (robot, plane, fixed coordinate)
+  // is the recolouring trigger; inside one map every answered cell is
+  // cached, so redrawing stays responsive.
+  const reachability = useMemo<ReachabilitySampler>(
+    () => createReachabilitySampler(ROBOT, state.plane, state.fixedMm),
+    [state.plane, state.fixedMm],
+  );
+  // One check per committed Segment, aligned with the draw order.
+  const violations = useMemo<readonly (ReachabilityViolation | null)[]>(
+    () => state.segments.map((segment) => checkSegmentReachability(ROBOT, segment)),
+    [state.segments],
+  );
+  const homeStatus = useMemo<PointReachability | null>(
+    () => (state.home === null ? null : checkPointReachability(ROBOT, [state.home.x, state.home.y, state.home.z])),
+    [state.home],
+  );
+  // The pending draft is checked against the hovered endpoint, so the
+  // preview turns red before the operator commits an unreachable Line.
+  const draftViolation = useMemo<ReachabilityViolation | null>(() => {
+    if (state.draftStart === null || cursor === null) return null;
+    const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
+    const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
+    return checkSegmentReachability(ROBOT, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
+  }, [state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -98,6 +161,12 @@ export function App() {
                 step={1}
               />
             </label>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", color: "#555" }}>
+              Достижимость:
+              <LegendSwatch color={REACHABILITY_COLORS.ok} label="достижимо" />
+              <LegendSwatch color={REACHABILITY_COLORS.unreachable} label="недостижимо" />
+              <LegendSwatch color={REACHABILITY_COLORS["angle-limit"]} label="предел шарнира" />
+            </div>
           </fieldset>
 
           <fieldset style={fieldsetStyle}>
@@ -105,6 +174,8 @@ export function App() {
             {(
               [
                 { tool: "line" as EditorTool, label: "Отрезок", hint: "два клика" },
+                { tool: "arc" as EditorTool, label: "Дуга", hint: "2–3 клика" },
+                { tool: "point" as EditorTool, label: "Точка", hint: "один клик" },
                 { tool: "home" as EditorTool, label: "Исходная точка", hint: "один клик" },
               ]
             ).map(({ tool, label, hint }) => (
@@ -120,6 +191,61 @@ export function App() {
                 <span style={{ color: "#888" }}>({hint})</span>
               </label>
             ))}
+            {state.tool === "arc" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", paddingLeft: "1.5rem" }}>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcMode"
+                    value="radius"
+                    checked={state.arcMode === "radius"}
+                    onChange={() => dispatch({ type: "setArcMode", mode: "radius" as ArcMode })}
+                  />
+                  Радиус R <span style={{ color: "#888" }}>(2 клика)</span>
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcMode"
+                    value="center"
+                    checked={state.arcMode === "center"}
+                    onChange={() => dispatch({ type: "setArcMode", mode: "center" as ArcMode })}
+                  />
+                  Центр <span style={{ color: "#888" }}>(3 клика)</span>
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcDirection"
+                    value="CW"
+                    checked={state.arcDirection === "CW"}
+                    onChange={() => dispatch({ type: "setArcDirection", direction: "CW" as ArcDirection })}
+                  />
+                  по часовой (CW)
+                </label>
+                <label style={rowStyle}>
+                  <input
+                    type="radio"
+                    name="arcDirection"
+                    value="CCW"
+                    checked={state.arcDirection === "CCW"}
+                    onChange={() => dispatch({ type: "setArcDirection", direction: "CCW" as ArcDirection })}
+                  />
+                  против часовой (CCW)
+                </label>
+                {state.arcMode === "radius" && (
+                  <label style={rowStyle}>
+                    Радиус R, мм{" "}
+                    <NumberField
+                      value={state.arcRadiusMm}
+                      onCommit={(raw) => dispatch({ type: "setArcRadiusMm", raw })}
+                      step={1}
+                      min={0.001}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
             <label style={rowStyle}>
               Подача, мм/мин{" "}
               <NumberField
@@ -130,6 +256,11 @@ export function App() {
               />
             </label>
           </fieldset>
+
+          <NumericEntryFieldset
+            letters={letters}
+            onEntry={(u, v) => dispatch({ type: "numericEntry", u, v })}
+          />
 
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button type="button" onClick={() => dispatch({ type: "undo" })} disabled={state.segments.length === 0}>
@@ -167,7 +298,7 @@ export function App() {
             )}
           </section>
           <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
-            Правая кнопка мыши отменяет незавершённый Отрезок.
+            Правая кнопка мыши отменяет незавершённый элемент.
           </p>
 
           <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -177,16 +308,40 @@ export function App() {
               {state.home === null ? (
                 "не задана"
               ) : (
-                <span style={{ fontFamily: "monospace" }}>{formatVec3(state.home)}</span>
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    color: homeStatus === "ok" ? undefined : VIOLATION_COLOR,
+                  }}
+                >
+                  {formatVec3(state.home)}
+                  {homeStatus !== null && homeStatus !== "ok" ? ` — ${statusWord(homeStatus)}` : ""}
+                </span>
               )}
             </div>
             <div style={{ color: "#555", fontSize: "0.9rem" }}>Участков: {state.segments.length}</div>
             <ol style={{ margin: 0, paddingLeft: "1.25rem", fontSize: "0.85rem", overflowY: "auto" }}>
-              {state.segments.map((segment, i) => (
-                <li key={i} style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>
-                  {segmentLabel(segment)}
-                </li>
-              ))}
+              {state.segments.map((segment, i) => {
+                const violation = violations[i] ?? null;
+                return (
+                  <li key={i} style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>
+                    {segmentLabel(segment)}
+                    {violation !== null && (
+                      <div style={{ color: VIOLATION_COLOR }}>{violationLabel(violation)}</div>
+                    )}
+                    <label style={{ ...rowStyle, fontFamily: "system-ui, sans-serif", marginTop: "0.15rem" }}>
+                      Подача, мм/мин{" "}
+                      <NumberField
+                        key={`${i}:${segment.feed}`}
+                        value={mmSToMmMin(segment.feed)}
+                        onCommit={(raw) => dispatch({ type: "setSegmentFeedMmMin", index: i, raw })}
+                        step={60}
+                        min={1}
+                      />
+                    </label>
+                  </li>
+                );
+              })}
             </ol>
           </section>
         </aside>
@@ -196,8 +351,12 @@ export function App() {
             plane={state.plane}
             segments={state.segments}
             home={state.home}
-            draftStart={state.draftStart}
+            draft={draftPreviewOf(state)}
             cursor={cursor}
+            reachability={reachability}
+            violations={violations}
+            draftViolation={draftViolation}
+            homeStatus={homeStatus}
             onPlaneClick={(uv) => dispatch({ type: "canvasClick", u: uv.x, v: uv.y })}
             onCursorMove={setCursor}
             onDraftCancel={() => dispatch({ type: "cancelDraft" })}
@@ -211,6 +370,9 @@ export function App() {
               color: "#444",
             }}
           >
+            {state.error !== null && (
+              <div style={{ color: "#b42318", marginBottom: "0.2rem" }}>{state.error}</div>
+            )}
             {cursor === null
               ? "Курсор: —"
               : `Курсор: ${letters.u} ${formatMm(cursor.x)} · ${letters.v} ${formatMm(cursor.y)} · фикс. ${letters.w} ${formatMm(state.fixedMm)} мм`}
@@ -226,6 +388,46 @@ const fieldsetStyle = { border: "1px solid #ddd", borderRadius: 4, margin: 0, pa
 
 /** One labelled row inside a fieldset. */
 const rowStyle = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;
+
+/** One Reachability legend entry: a colour swatch followed by its Russian label. */
+function LegendSwatch(props: { readonly color: string; readonly label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+      <span
+        style={{
+          width: 10,
+          height: 10,
+          background: props.color,
+          border: "1px solid #bbb",
+          display: "inline-block",
+        }}
+      />
+      {props.label}
+    </span>
+  );
+}
+
+/** The Russian UI word for one Reachability status, as in the legend. */
+function statusWord(status: PointReachability): string {
+  switch (status) {
+    case "ok":
+      return "достижимо";
+    case "unreachable":
+      return "недостижимо";
+    case "angle-limit":
+      return "предел шарнира";
+  }
+}
+
+/** The Russian UI note for one Reachability violation, naming the place and cause. */
+function violationLabel(violation: ReachabilityViolation): string {
+  switch (violation.status) {
+    case "unreachable":
+      return `${statusWord(violation.status)} (${formatVec3(violation.atMm)})`;
+    case "angle-limit":
+      return `${statusWord(violation.status)} ${violation.joint} (${violation.bound === "min" ? "мин" : "макс"})`;
+  }
+}
 
 /**
  * A numeric field for millimetre and feed values: keeps the raw text
@@ -248,6 +450,43 @@ function NumberField(props: { readonly value: number; readonly onCommit: (raw: s
         props.onCommit(e.target.value);
       }}
     />
+  );
+}
+
+/** The fieldset look for the numeric coordinate entry. */
+function NumericEntryFieldset(props: { readonly letters: { u: string; v: string; w: string }; readonly onEntry: (u: number, v: number) => void }): JSX.Element {
+  const [uText, setUText] = useState("");
+  const [vText, setVText] = useState("");
+  const u = Number(uText);
+  const v = Number(vText);
+  const valid = uText.trim() !== "" && vText.trim() !== "" && Number.isFinite(u) && Number.isFinite(v);
+  const inputStyle = { width: 90, fontFamily: "monospace" } as const;
+  return (
+    <fieldset style={fieldsetStyle}>
+      <legend>Ввод координат</legend>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <label style={rowStyle}>
+          {props.letters.u}, мм <input type="number" value={uText} style={inputStyle} onChange={(e) => setUText(e.target.value)} />
+        </label>
+        <label style={rowStyle}>
+          {props.letters.v}, мм <input type="number" value={vText} style={inputStyle} onChange={(e) => setVText(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          disabled={!valid}
+          onClick={() => {
+            props.onEntry(u, v);
+            setUText("");
+            setVText("");
+          }}
+        >
+          Ввести точку
+        </button>
+      </div>
+      <p style={{ margin: 0, color: "#888", fontSize: "0.8rem" }}>
+        Ввод действует как клик по активному инструменту, но точно по координатам.
+      </p>
+    </fieldset>
   );
 }
 

@@ -4,7 +4,9 @@ import { planeCoords } from "../core";
 import { line as coreLine, vec2, vec3 } from "../core";
 import { type ProjectContent } from "../project";
 import {
+  DEFAULT_ARC_RADIUS_MM,
   DEFAULT_FEED_MM_MIN,
+  draftPreviewOf,
   editorReducer,
   initialEditorState,
   mmMinToMmS,
@@ -30,9 +32,14 @@ describe("editor state", () => {
       fixedMm: 0,
       feedMmMin: DEFAULT_FEED_MM_MIN,
       tool: "line",
+      arcMode: "radius",
+      arcDirection: "CCW",
+      arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
       home: null,
       segments: [],
       draftStart: null,
+      draftCenter: null,
+      error: null,
     });
   });
 
@@ -151,6 +158,305 @@ describe("editor state", () => {
     const drafting = click(initialEditorState, 5, 5);
     const toHome = editorReducer(drafting, { type: "setTool", tool: "home" });
     expect(toHome.draftStart).toBeNull();
+  });
+
+  it("Point tool commits a Point Segment with one click: the pen moves without drawn geometry", () => {
+    let state = editorReducer(initialEditorState, { type: "setTool", tool: "point" });
+    state = click(state, 3.25, -1.5);
+    expect(state.segments).toHaveLength(1);
+    const seg = state.segments[0]!;
+    expect(seg.kind).toBe("point");
+    if (seg.kind !== "point") return;
+    expect(seg.target).toEqual({ x: 3.25, y: -1.5, z: 0 });
+    expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+    // A Point has no draft: the next click starts fresh.
+    expect(state.draftStart).toBeNull();
+  });
+
+  it("Point tool places the target on the current plane's fixed coordinate", () => {
+    let state = editorReducer({ ...initialEditorState, plane: "XZ", fixedMm: -4 }, { type: "setTool", tool: "point" });
+    state = click(state, 6, 8);
+    const seg = state.segments[0]!;
+    expect(seg.kind).toBe("point");
+    if (seg.kind !== "point") return;
+    expect(seg.target).toEqual({ x: 6, y: -4, z: 8 });
+  });
+
+  it("defaults the Arc tool to radius mode, CCW, radius 10 mm", () => {
+    expect(initialEditorState.arcMode).toBe("radius");
+    expect(initialEditorState.arcDirection).toBe("CCW");
+    expect(initialEditorState.arcRadiusMm).toBe(DEFAULT_ARC_RADIUS_MM);
+    expect(initialEditorState.draftCenter).toBeNull();
+    expect(initialEditorState.error).toBeNull();
+  });
+
+  it("commits a canonical Arc after two clicks in radius mode", () => {
+    const state = editorReducer(
+      { ...initialEditorState, tool: "arc", arcRadiusMm: 10 },
+      { type: "canvasClick", u: 0, v: 0 },
+    );
+    const done = click(state, 8, 0);
+    expect(done.segments).toHaveLength(1);
+    const seg = done.segments[0]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    expect(seg.plane).toBe("XY");
+    expect(seg.start).toEqual({ x: 0, y: 0, z: 0 });
+    expect(seg.end).toEqual({ x: 8, y: 0, z: 0 });
+    expect(seg.radiusMm).toBe(10);
+    // CCW resolves the center 90° left of the chord: above it, in XY.
+    expect(seg.center).toEqual({ x: 4, y: Math.sqrt(10 * 10 - 4 * 4), z: 0 });
+    expect(seg.sweepRad).toBeGreaterThan(0);
+    expect(seg.sweepRad).toBeLessThan(Math.PI);
+    expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+    expect(done.draftStart).toBeNull();
+    expect(done.error).toBeNull();
+  });
+
+  it("CW and CCW resolve distinct arcs from the same clicks", () => {
+    const clicks = { type: "canvasClick", u: 0, v: 0 } as const;
+    const ccw = click(editorReducer({ ...initialEditorState, tool: "arc", arcDirection: "CCW" }, clicks), 8, 0);
+    const cw = click(editorReducer({ ...initialEditorState, tool: "arc", arcDirection: "CW" }, clicks), 8, 0);
+    const ccwSeg = ccw.segments[0]!;
+    const cwSeg = cw.segments[0]!;
+    expect(ccwSeg.kind).toBe("arc");
+    expect(cwSeg.kind).toBe("arc");
+    if (ccwSeg.kind !== "arc" || cwSeg.kind !== "arc") return;
+    // The centers sit on opposite sides of the chord; the sweeps oppose.
+    expect(cwSeg.center.y).toBe(-ccwSeg.center.y);
+    expect(cwSeg.sweepRad).toBeLessThan(0);
+    expect(ccwSeg.sweepRad).toBeGreaterThan(0);
+  });
+
+  it("rejects endpoints farther apart than 2·R at draw time with a readable message, keeping the draft start", () => {
+    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
+    const rejected = click(drafting, 50, 0);
+    expect(rejected.segments).toHaveLength(0);
+    // The draft start stays so the operator can click a valid end.
+    expect(rejected.draftStart).toEqual(vec2(0, 0));
+    expect(rejected.error).toContain("невозможна");
+    expect(rejected.error).toContain("радиус");
+  });
+
+  it("rejects coincident endpoint clicks (no unique center from R)", () => {
+    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 3, 4);
+    const rejected = click(drafting, 3, 4);
+    expect(rejected.segments).toHaveLength(0);
+    expect(rejected.error).toContain("невозможна");
+  });
+
+  it("clears the rejection once a valid retry commits", () => {
+    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
+    const rejected = click(drafting, 50, 0);
+    const retried = click(rejected, 8, 0);
+    expect(retried.segments).toHaveLength(1);
+    expect(retried.error).toBeNull();
+    expect(retried.draftStart).toBeNull();
+  });
+
+  it("applies radius and direction changes live to the next commit", () => {
+    let state = editorReducer(initialEditorState, { type: "setTool", tool: "arc" });
+    state = editorReducer(state, { type: "setArcRadiusMm", raw: "25" });
+    state = editorReducer(state, { type: "setArcDirection", direction: "CW" });
+    const drafting = click(state, 0, 0);
+    const done = click(drafting, 10, 0);
+    const seg = done.segments[0]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    expect(seg.radiusMm).toBe(25);
+    expect(seg.direction).toBe("CW");
+    expect(seg.center).toEqual({ x: 5, y: -Math.sqrt(25 * 25 - 5 * 5), z: 0 });
+  });
+
+  it("keeps the previous radius on invalid input", () => {
+    let state = editorReducer(initialEditorState, { type: "setArcRadiusMm", raw: "7.5" });
+    for (const raw of ["", "abc", "0", "-2", "NaN"]) {
+      state = editorReducer(state, { type: "setArcRadiusMm", raw });
+      expect(state.arcRadiusMm).toBe(7.5);
+    }
+  });
+
+  it("cancelling the draft clears the rejection", () => {
+    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
+    const rejected = click(drafting, 50, 0);
+    const cancelled = editorReducer(rejected, { type: "cancelDraft" });
+    expect(cancelled.error).toBeNull();
+    expect(cancelled.draftStart).toBeNull();
+  });
+
+  it("center mode: three clicks commit an Arc with the clicked center and the end snapped onto the circle", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 0, v: 0 });
+    state = click(state, 10, 0); // the center, 10 mm from the start
+    expect(state.draftStart).toEqual(vec2(0, 0));
+    expect(state.draftCenter).toEqual(vec2(10, 0));
+    state = click(state, 19, 7); // off-circle on purpose: snapped onto the circle
+    expect(state.segments).toHaveLength(1);
+    const seg = state.segments[0]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    expect(seg.center).toEqual({ x: 10, y: 0, z: 0 });
+    expect(seg.radiusMm).toBe(10);
+    expect(seg.direction).toBe("CCW");
+    // The end lands exactly on the circle around the center.
+    const end = planeCoords("XY", seg.end);
+    expect(Math.hypot(end.u - 10, end.v)).toBeCloseTo(10, 12);
+    expect(state.draftStart).toBeNull();
+    expect(state.draftCenter).toBeNull();
+    expect(state.error).toBeNull();
+  });
+
+  it("center mode: CW and CCW sweep opposite ways from the same clicks", () => {
+    const draw = (direction: "CW" | "CCW"): EditorState => {
+      let state = editorReducer(
+        { ...initialEditorState, tool: "arc", arcMode: "center", arcDirection: direction },
+        { type: "canvasClick", u: 0, v: 0 },
+      );
+      state = click(state, 10, 0);
+      return click(state, 16, 8);
+    };
+    const ccw = draw("CCW").segments[0]!;
+    const cw = draw("CW").segments[0]!;
+    expect(ccw.kind).toBe("arc");
+    expect(cw.kind).toBe("arc");
+    if (ccw.kind !== "arc" || cw.kind !== "arc") return;
+    expect(ccw.sweepRad).toBeGreaterThan(0);
+    expect(cw.sweepRad).toBeLessThan(0);
+  });
+
+  it("center mode: rejects a center click on the start with a readable message", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 3, v: 4 });
+    state = click(state, 3, 4);
+    expect(state.segments).toHaveLength(0);
+    expect(state.draftCenter).toBeNull();
+    expect(state.draftStart).toEqual(vec2(3, 4));
+    expect(state.error).toContain("невозможна");
+    expect(state.error).toContain("центр");
+    // A side click after the rejection still pends the center.
+    const recovered = click(state, 13, 4);
+    expect(recovered.error).toBeNull();
+    expect(recovered.draftCenter).toEqual(vec2(13, 4));
+  });
+
+  it("center mode: an end click on the center is rejected, keeping start and center", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 0, v: 0 });
+    state = click(state, 10, 0);
+    const rejected = click(state, 10, 0);
+    expect(rejected.segments).toHaveLength(0);
+    expect(rejected.draftStart).toEqual(vec2(0, 0));
+    expect(rejected.draftCenter).toEqual(vec2(10, 0));
+    expect(rejected.error).toContain("невозможна");
+  });
+
+  it("switching the Arc mode keeps the pending start and drops a pending center", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 1, v: 2 });
+    state = click(state, 5, 2);
+    const switched = editorReducer(state, { type: "setArcMode", mode: "radius" });
+    expect(switched.arcMode).toBe("radius");
+    expect(switched.draftStart).toEqual(vec2(1, 2));
+    expect(switched.draftCenter).toBeNull();
+    expect(switched.error).toBeNull();
+  });
+
+  it("numeric entry commits exactly like a click, landing the typed coordinates exactly", () => {
+    const drafting = editorReducer(initialEditorState, { type: "numericEntry", u: 0.123456789, v: -45.5 });
+    expect(drafting.draftStart).toEqual(vec2(0.123456789, -45.5));
+    const done = editorReducer(drafting, { type: "numericEntry", u: 12.75, v: 3 });
+    const seg = done.segments[0]!;
+    expect(seg.kind).toBe("line");
+    if (seg.kind !== "line") return;
+    expect(seg.start).toEqual({ x: 0.123456789, y: -45.5, z: 0 });
+    expect(seg.end).toEqual({ x: 12.75, y: 3, z: 0 });
+  });
+
+  it("numeric entry sets the Home Point exactly in home mode", () => {
+    let state = editorReducer(initialEditorState, { type: "setTool", tool: "home" });
+    state = editorReducer(state, { type: "numericEntry", u: -7.25, v: 8.125 });
+    expect(state.home).toEqual({ x: -7.25, y: 8.125, z: 0 });
+  });
+
+  it("numeric entry commits a Point Segment in point mode", () => {
+    let state = editorReducer(initialEditorState, { type: "setTool", tool: "point" });
+    state = editorReducer(state, { type: "numericEntry", u: 4.5, v: 6.5 });
+    const seg = state.segments[0]!;
+    expect(seg.kind).toBe("point");
+    if (seg.kind !== "point") return;
+    expect(seg.target).toEqual({ x: 4.5, y: 6.5, z: 0 });
+  });
+
+  it("numeric entry ignores non-finite coordinates", () => {
+    const state = editorReducer(initialEditorState, { type: "numericEntry", u: Number.NaN, v: 5 });
+    expect(state).toEqual(initialEditorState);
+  });
+
+  it("numeric entry drives the Arc draft: two entries commit a radius-mode Arc", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, { type: "numericEntry", u: 0, v: 0 });
+    state = editorReducer(state, { type: "numericEntry", u: 8, v: 0 });
+    expect(state.segments).toHaveLength(1);
+    expect(state.segments[0]!.kind).toBe("arc");
+  });
+
+  it("edits one Segment's Feed in mm/min without touching the others", () => {
+    let state = drawLine(initialEditorState, 0, 0, 10, 0);
+    state = editorReducer(state, { type: "setTool", tool: "point" });
+    state = click(state, 20, 0);
+    state = editorReducer(state, { type: "setTool", tool: "line" });
+    state = drawLine(state, 20, 0, 30, 0);
+    const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 1, raw: "300" });
+    const feeds = edited.segments.map((s) => mmSToMmMin(s.feed));
+    expect(feeds).toEqual([mmSToMmMin(mmMinToMmS(DEFAULT_FEED_MM_MIN)), 300, mmSToMmMin(mmMinToMmS(DEFAULT_FEED_MM_MIN))]);
+  });
+
+  it("edits the Feed of an Arc Segment in place", () => {
+    let state = editorReducer({ ...initialEditorState, tool: "arc" }, { type: "canvasClick", u: 0, v: 0 });
+    state = click(state, 8, 0);
+    const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw: "600" });
+    const seg = edited.segments[0]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    expect(seg.feed).toBe(10); // 600 mm/min = 10 mm/s
+    // Geometry is untouched by a feed edit.
+    expect(seg.radiusMm).toBe(10);
+    expect(seg.start).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it("keeps a Segment's Feed on invalid input", () => {
+    const state = drawLine(initialEditorState, 0, 0, 10, 0);
+    for (const raw of ["", "abc", "0", "-5", "NaN"]) {
+      const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw });
+      expect(edited.segments[0]!.feed).toBe(state.segments[0]!.feed);
+    }
+  });
+
+  it("ignores a Feed edit for an unknown Segment index", () => {
+    const state = drawLine(initialEditorState, 0, 0, 10, 0);
+    expect(editorReducer(state, { type: "setSegmentFeedMmMin", index: 5, raw: "300" })).toBe(state);
+    expect(editorReducer(state, { type: "setSegmentFeedMmMin", index: -1, raw: "300" })).toBe(state);
+  });
+
+  it("draftPreviewOf describes the pending draft for the canvas view", () => {
+    // No draft: null.
+    expect(draftPreviewOf(initialEditorState)).toBeNull();
+    // A pending Line draft.
+    const lineDraft = click(initialEditorState, 1, 2);
+    expect(draftPreviewOf(lineDraft)).toEqual({ kind: "line", start: vec2(1, 2) });
+    // A pending radius-mode Arc draft carries radius and direction.
+    const arcDraft = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 14, arcDirection: "CW" }, 3, 4);
+    expect(draftPreviewOf(arcDraft)).toEqual({
+      kind: "arcRadius",
+      start: vec2(3, 4),
+      radiusMm: 14,
+      direction: "CW",
+    });
+    // A pending center-mode draft: center null after click 1, set after click 2.
+    let centerDraft = click({ ...initialEditorState, tool: "arc", arcMode: "center", arcDirection: "CW" }, 1, 1);
+    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: null, direction: "CW" });
+    centerDraft = click(centerDraft, 6, 1);
+    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: vec2(6, 1), direction: "CW" });
+    // One-click tools hold no draft.
+    const homeState = editorReducer({ ...initialEditorState, tool: "home" }, { type: "canvasClick", u: 5, v: 5 });
+    expect(draftPreviewOf(homeState)).toBeNull();
+    const pointState = editorReducer({ ...initialEditorState, tool: "point" }, { type: "canvasClick", u: 5, v: 5 });
+    expect(draftPreviewOf(pointState)).toBeNull();
   });
 
   it("cancelDraft drops a pending draft without committing a Segment", () => {

@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from "react";
 
 import { vec2, type Segment, type Vec2, type Vec3, type WorkingPlane } from "../core";
+import type {
+  PointReachability,
+  ReachabilityViolation,
+} from "../kinematics/reachability";
+import type { DraftPreview } from "./editor";
 import { drawScene } from "./canvas/draw";
+import type { ReachabilitySampler } from "./canvas/reachability";
 import {
   backingSize,
   makeCanvasTransform,
@@ -17,10 +23,18 @@ export interface CanvasProps {
   readonly segments: readonly Segment[];
   /** The Home Point, or null while unset. */
   readonly home: Vec3 | null;
-  /** Pending Line start in plane millimetres, or null. */
-  readonly draftStart: Vec2 | null;
+  /** The pending draft descriptor, or null when nothing is pending. */
+  readonly draft: DraftPreview | null;
   /** Cursor position in plane millimetres, or null when off-canvas. */
   readonly cursor: Vec2 | null;
+  /** The live Reachability map over the Working Plane. */
+  readonly reachability: ReachabilitySampler;
+  /** Per-Segment Reachability violations, aligned with `segments` by index. */
+  readonly violations: readonly (ReachabilityViolation | null)[];
+  /** Violation of the pending draft preview, or null when none. */
+  readonly draftViolation: ReachabilityViolation | null;
+  /** Reachability of the Home Point, or null while unset. */
+  readonly homeStatus: PointReachability | null;
   /** Called with plane millimetres when the operator clicks the canvas. */
   readonly onPlaneClick: (uv: Vec2) => void;
   /** Called with plane millimetres on pointer move, or null on leave. */
@@ -57,10 +71,25 @@ export function Canvas(props: CanvasProps): JSX.Element {
       plane: props.plane,
       segments: props.segments,
       home: props.home,
-      draftStart: props.draftStart,
+      draft: props.draft,
       cursor: props.cursor,
+      reachability: props.reachability,
+      violations: props.violations,
+      draftViolation: props.draftViolation,
+      homeStatus: props.homeStatus,
     });
-  }, [transform, props.plane, props.segments, props.home, props.draftStart, props.cursor]);
+  }, [
+    transform,
+    props.plane,
+    props.segments,
+    props.home,
+    props.draft,
+    props.cursor,
+    props.reachability,
+    props.violations,
+    props.draftViolation,
+    props.homeStatus,
+  ]);
 
   /** Unprojects a pointer event to plane millimetres. */
   const planePointOf = (e: React.PointerEvent<HTMLCanvasElement>): Vec2 | null => {
