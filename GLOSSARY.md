@@ -45,6 +45,11 @@ here.
   path → IK results → Motion Plan → exported arrays. **Collision
   checking (Проверка коллизий)** is a reserved stage, deliberately empty
   in v1.
+- **Generation (Генерация)** — one run of the drawn Trajectory through
+  the pipeline (the Validation stages in order). The last *successful*
+  Generation owns the Charts shown in «Графики» and unlocks the CSV
+  export; editing the drawing afterwards locks export until the
+  operator runs a new Generation.
 - **Exporter (Экспортёр)** — a named output writer.
 - **Chart (График)** — one rendered plot of the Motion Plan: joint
   angles/velocities/accelerations/jerks over time (Углы/Скорости/
