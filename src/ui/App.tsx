@@ -3,18 +3,13 @@ import { useMemo, useReducer, useState, type JSX } from "react";
 import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
 import { serializeProject } from "../project";
 import { APP_NAME, APP_VERSION } from "../core/version";
-import { projectBridge } from "./bridge";
-import {
-  DEFAULT_MIKO_MINI_CONFIG,
-  createMiKoMiniModel,
-} from "../kinematics/miko-mini";
+import { bridge } from "./bridge";
 import {
   checkPointReachability,
   checkSegmentReachability,
   type PointReachability,
   type ReachabilityViolation,
 } from "../kinematics/reachability";
-import type { RobotModel } from "../kinematics/robot-model";
 import { Canvas } from "./Canvas";
 import { VIOLATION_COLOR } from "./canvas/draw";
 import {
@@ -22,6 +17,13 @@ import {
   createReachabilitySampler,
   type ReachabilitySampler,
 } from "./canvas/reachability";
+import {
+  generationIsStale,
+  generationLogLines,
+  runGeneration,
+  type GenerationOutcome,
+} from "./generation";
+import { MIKO_MINI } from "./robot";
 import {
   draftPreviewOf,
   editorReducer,
@@ -37,20 +39,6 @@ import {
 } from "./editor";
 
 /**
- * The v1 Robot Model every drawing view is checked against: the
- * default MiKo-mini configuration (ADR 0008). Built once at module
- * load; the shipped configuration is validated by the kinematics tests,
- * so a failure here is a programming error, not a runtime condition.
- */
-const ROBOT: RobotModel = (() => {
-  const built = createMiKoMiniModel(DEFAULT_MIKO_MINI_CONFIG);
-  if (built.status !== "ok") {
-    throw new Error(`invalid default MiKo-mini config: ${built.problems.join("; ")}`);
-  }
-  return built.model;
-})();
-
-/**
  * The trajectory editor: the operator picks the Working Plane with its
  * fixed coordinate, draws Line, Arc (R or center, CW/CCW), and Point
  * Segments on a millimetre grid — clicking or typing exact coordinates —
@@ -58,24 +46,52 @@ const ROBOT: RobotModel = (() => {
  * Impossible Arcs are rejected at draw time with a readable message.
  * Drawn geometry is held as canonical Segments in the editor state (see
  * `editor.ts`); the canvas is a pure view over that state (ADR 0005,
- * ADR 0007). UI text is Russian per GLOSSARY.md.
+ * ADR 0007). On «Сгенерировать» the drawn Trajectory runs through the
+ * headless pipeline (`runGeneration`) and the validation stage log is
+ * shown; a successful generation unlocks «Экспорт CSV», which writes
+ * the Robot CSV and RViz CSV into an operator-picked folder through the
+ * main process. UI text is Russian per GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   /** Status of the last Project File operation; the flag, not the text, decides the colour. */
   const [projectMessage, setProjectMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
+  /** The last generation attempt, shown as the generation log. */
+  const [generation, setGeneration] = useState<GenerationOutcome | null>(null);
+  /** Status of the last CSV export; the flag, not the text, decides the colour. */
+  const [exportMessage, setExportMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
   const letters = planeAxisLetters(state.plane);
+
+  /** Runs generation on the drawn Trajectory and shows the log. */
+  const handleGenerate = (): void => {
+    setGeneration(runGeneration(state, MIKO_MINI));
+    setExportMessage(null);
+  };
+
+  /** Writes the generated Robot CSV and RViz CSV into a picked folder. */
+  const handleExport = async (): Promise<void> => {
+    if (generation === null || generation.kind !== "ok") return;
+    const api = bridge();
+    if (api === null) {
+      setExportMessage({ text: "Экспорт недоступен: нет моста к основному процессу.", isError: true });
+      return;
+    }
+    const result = await api.exportCsvs(generation.result.robotCsv, generation.result.rvizCsv);
+    if (result.kind === "exported") setExportMessage({ text: `Экспортировано: ${result.files.join(", ")}`, isError: false });
+    else if (result.kind === "canceled") setExportMessage(null);
+    else setExportMessage({ text: `Экспорт не выполнен: ${result.error.message}`, isError: true });
+  };
 
   /** Saves the drawing as a Project File through the main process. */
   const handleSave = async (): Promise<void> => {
-    const bridge = projectBridge();
-    if (bridge === null) {
+    const api = bridge();
+    if (api === null) {
       setProjectMessage({ text: "Сохранение недоступно: нет моста к основному процессу.", isError: true });
       return;
     }
     const json = serializeProject(projectContentOf(state));
-    const result = await bridge.saveProject(json);
+    const result = await api.saveProject(json);
     if (result.kind === "saved") setProjectMessage({ text: `Сохранено: ${result.path}`, isError: false });
     else if (result.kind === "canceled") setProjectMessage(null);
     else setProjectMessage({ text: `Не сохранено: ${result.error.message}`, isError: true });
@@ -83,12 +99,12 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
 
   /** Opens a Project File through the main process and restores the drawing. */
   const handleOpen = async (): Promise<void> => {
-    const bridge = projectBridge();
-    if (bridge === null) {
+    const api = bridge();
+    if (api === null) {
       setProjectMessage({ text: "Открытие недоступно: нет моста к основному процессу.", isError: true });
       return;
     }
-    const result = await bridge.openProject();
+    const result = await api.openProject();
     if (result.kind === "loaded") {
       dispatch({ type: "loadProject", content: result.content });
       setProjectMessage({ text: `Открыт: ${result.path}`, isError: false });
@@ -100,16 +116,16 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   // is the recolouring trigger; inside one map every answered cell is
   // cached, so redrawing stays responsive.
   const reachability = useMemo<ReachabilitySampler>(
-    () => createReachabilitySampler(ROBOT, state.plane, state.fixedMm),
+    () => createReachabilitySampler(MIKO_MINI, state.plane, state.fixedMm),
     [state.plane, state.fixedMm],
   );
   // One check per committed Segment, aligned with the draw order.
   const violations = useMemo<readonly (ReachabilityViolation | null)[]>(
-    () => state.segments.map((segment) => checkSegmentReachability(ROBOT, segment)),
+    () => state.segments.map((segment) => checkSegmentReachability(MIKO_MINI, segment)),
     [state.segments],
   );
   const homeStatus = useMemo<PointReachability | null>(
-    () => (state.home === null ? null : checkPointReachability(ROBOT, [state.home.x, state.home.y, state.home.z])),
+    () => (state.home === null ? null : checkPointReachability(MIKO_MINI, [state.home.x, state.home.y, state.home.z])),
     [state.home],
   );
   // The pending draft is checked against the hovered endpoint, so the
@@ -118,7 +134,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
     if (state.draftStart === null || cursor === null) return null;
     const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
     const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
-    return checkSegmentReachability(ROBOT, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
+    return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
   }, [state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
 
   return (
@@ -295,6 +311,63 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 }}
               >
                 {projectMessage.text}
+              </p>
+            )}
+          </section>
+          <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <h2 style={{ fontSize: "1rem", margin: 0 }}>Генерация</h2>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" onClick={handleGenerate}>Сгенерировать</button>
+              <button
+                type="button"
+                onClick={() => void handleExport()}
+                disabled={generation === null || generation.kind !== "ok" || generationIsStale(generation, state)}
+              >
+                Экспорт CSV…
+              </button>
+            </div>
+            {generation !== null && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.1rem",
+                  fontFamily: "monospace",
+                  fontSize: "0.8rem",
+                }}
+              >
+                {generationLogLines(generation).map((logLine, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      color:
+                      logLine.kind === "failed" || logLine.kind === "blocked"
+                        ? "#b42318"
+                        : "#555",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {logLine.kind === "ok" ? "✓ " : logLine.kind === "failed" ? "✗ " : ""}
+                    {logLine.text}
+                  </div>
+                ))}
+              </div>
+            )}
+            {generation !== null && generation.kind === "ok" && generationIsStale(generation, state) && (
+              <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
+                Чертёж изменился после генерации — сгенерируйте заново перед экспортом.
+              </p>
+            )}
+            {exportMessage !== null && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.85rem",
+                  color: exportMessage.isError ? "#b00" : "#555",
+                  wordBreak: "break-all",
+                }}
+              >
+                {exportMessage.text}
               </p>
             )}
           </section>
