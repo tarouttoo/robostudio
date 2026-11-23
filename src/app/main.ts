@@ -2,7 +2,14 @@ import { join } from "node:path";
 
 import { APP_NAME } from "../core/version";
 import { openProjectFile, saveProjectFile, type ProjectDialogs } from "./project-ipc";
-import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import {
+  BrowserWindow,
+  app,
+  dialog,
+  ipcMain,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+} from "electron";
 
 /** URL of the Vite dev server; set by `npm run dev`, absent in production. */
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -16,22 +23,32 @@ let projectIpcRegistered = false;
  * renderer only ever sees the result records (ADR 0003). Registered
  * once; later windows share the same channels.
  */
-function registerProjectIpc(window: BrowserWindow): void {
+function registerProjectIpc(): void {
   if (projectIpcRegistered) return;
   projectIpcRegistered = true;
+  // The dialog parent is resolved at call time, not captured here: a
+  // registered handler outlives any window (macOS re-activate creates a
+  // new one), and a destroyed parent would make every dialog throw.
+  const parent = (): BrowserWindow | undefined => BrowserWindow.getFocusedWindow() ?? undefined;
   const dialogs: ProjectDialogs = {
-    showSave: () =>
-      dialog.showSaveDialog(window, {
+    showSave: () => {
+      const options: SaveDialogOptions = {
         title: "Сохранить Файл проекта",
         defaultPath: "project.json",
         filters: [{ name: "Файл проекта", extensions: ["json"] }],
-      }),
-    showOpen: () =>
-      dialog.showOpenDialog(window, {
+      };
+      const owner = parent();
+      return owner === undefined ? dialog.showSaveDialog(options) : dialog.showSaveDialog(owner, options);
+    },
+    showOpen: () => {
+      const options: OpenDialogOptions = {
         title: "Открыть Файл проекта",
         filters: [{ name: "Файл проекта", extensions: ["json"] }],
         properties: ["openFile"],
-      }),
+      };
+      const owner = parent();
+      return owner === undefined ? dialog.showOpenDialog(options) : dialog.showOpenDialog(owner, options);
+    },
   };
   ipcMain.handle("project:save", (_event, json: string) => saveProjectFile(dialogs, json));
   ipcMain.handle("project:open", () => openProjectFile(dialogs));
@@ -60,7 +77,7 @@ function createMainWindow(): BrowserWindow {
   } else {
     void window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
   }
-  registerProjectIpc(window);
+  registerProjectIpc();
   return window;
 }
 

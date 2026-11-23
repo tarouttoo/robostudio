@@ -14,6 +14,8 @@
  * May import only from `core`.
  */
 
+import { ProjectError } from "./errors";
+
 import {
   arcFromCenter,
   line,
@@ -182,8 +184,6 @@ export function parseProject(json: string): ProjectContent {
     segments: requireSegments(value),
   };
 }
-
-import { ProjectError } from "./errors";
 
 /** Type guard: the value is a plain JSON object. */
 function isObject(value: unknown): value is Record<string, unknown> {

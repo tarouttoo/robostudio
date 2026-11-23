@@ -63,36 +63,37 @@ const ROBOT: RobotModel = (() => {
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
-  const [projectMessage, setProjectMessage] = useState<string | null>(null);
+  /** Status of the last Project File operation; the flag, not the text, decides the colour. */
+  const [projectMessage, setProjectMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
   const letters = planeAxisLetters(state.plane);
 
   /** Saves the drawing as a Project File through the main process. */
   const handleSave = async (): Promise<void> => {
     const bridge = projectBridge();
     if (bridge === null) {
-      setProjectMessage("Сохранение недоступно: нет моста к основному процессу.");
+      setProjectMessage({ text: "Сохранение недоступно: нет моста к основному процессу.", isError: true });
       return;
     }
     const json = serializeProject(projectContentOf(state));
     const result = await bridge.saveProject(json);
-    if (result.kind === "saved") setProjectMessage(`Сохранено: ${result.path}`);
+    if (result.kind === "saved") setProjectMessage({ text: `Сохранено: ${result.path}`, isError: false });
     else if (result.kind === "canceled") setProjectMessage(null);
-    else setProjectMessage(`Не сохранено: ${result.error.message}`);
+    else setProjectMessage({ text: `Не сохранено: ${result.error.message}`, isError: true });
   };
 
   /** Opens a Project File through the main process and restores the drawing. */
   const handleOpen = async (): Promise<void> => {
     const bridge = projectBridge();
     if (bridge === null) {
-      setProjectMessage("Открытие недоступно: нет моста к основному процессу.");
+      setProjectMessage({ text: "Открытие недоступно: нет моста к основному процессу.", isError: true });
       return;
     }
     const result = await bridge.openProject();
     if (result.kind === "loaded") {
       dispatch({ type: "loadProject", content: result.content });
-      setProjectMessage(`Открыт: ${result.path}`);
+      setProjectMessage({ text: `Открыт: ${result.path}`, isError: false });
     } else if (result.kind === "canceled") setProjectMessage(null);
-    else setProjectMessage(result.error.message);
+    else setProjectMessage({ text: result.error.message, isError: true });
   };
 
   // Live Reachability: a fresh map per (robot, plane, fixed coordinate)
@@ -289,11 +290,11 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 style={{
                   margin: 0,
                   fontSize: "0.85rem",
-                  color: projectMessage.startsWith("Не сохранено") || projectMessage.includes("недоступно") ? "#b00" : "#555",
+                  color: projectMessage.isError ? "#b00" : "#555",
                   wordBreak: "break-all",
                 }}
               >
-                {projectMessage}
+                {projectMessage.text}
               </p>
             )}
           </section>
