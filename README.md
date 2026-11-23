@@ -53,15 +53,21 @@ only through the preload bridge (ADR 0003).
 The agent pipeline code lives under
 `.sandcastle/` and `.github/workflows/` and is kept verbatim from the
 template it came from (see [Agent pipeline](#agent-pipeline)); the
-product CI workflow `ci.yml` is the one addition there.
+product workflows `ci.yml` and `release.yml` are the only additions
+there.
 
 ## Builds and releases
 
 On a `v*` tag, the release workflow builds with electron-builder and opens
-a draft GitHub release:
+a draft GitHub release (ADR 0009):
 
 - Windows: NSIS installer + portable zip
 - Linux: portable zip
+
+The tag is the single source of truth for the released version: the
+workflow stamps it into package.json before building, so the artifacts are
+named `robostudio-<version>-setup.exe`, `robostudio-<version>-win.zip` and
+`robostudio-<version>-linux.zip`. Publishing the draft stays manual.
 
 ## Agent pipeline
 

@@ -3,7 +3,37 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "CNC-style trajectory studio for the MiKo-mini 3-DOF manipulator.",
+  "author": "tarouttoo",
   "main": "dist/main/main.js",
+  "build": {
+    "appId": "com.tarouttoo.robostudio",
+    "productName": "robostudio",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "${name}-${version}-win.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "artifactName": "${name}-${version}-setup.${ext}"
+    },
+    "linux": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "${name}-${version}-linux.${ext}"
+    }
+  },
   "scripts": {
     "dev": "npm run build:main && npm run build:preload && concurrently -k -s first \"vite --strictPort\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "npm run build:renderer && npm run build:main && npm run build:preload",
@@ -15,13 +45,8 @@
     "test:app": "vitest run --exclude \".sandcastle/**\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.renderer.json"
   },
-  "dependencies": {
-    "@ai-hero/sandcastle": "^0.12.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "tsx": "^4.23.15"
-  },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.14.0",
     "@standard-schema/spec": "^1.1.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
@@ -30,8 +55,12 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "oxlint": "^1.94.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.0.5",
