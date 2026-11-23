@@ -10,9 +10,12 @@
  * PCHIP Planner is created inside the session from that model, so the
  * app shell holds one stable reference and a second robot is one
  * configuration change at the factory, not edits at every call site.
- * The pipeline is the seam: this module only turns editor state into a
- * Trajectory, runs it, and renders the outcome — no plotting or export
- * logic lives here.
+ *
+ * The module also owns the Generation policy around an attempt: the
+ * one export-eligibility predicate (`exportEligibility`) the export
+ * button and its stale notice render from, and the main-area view an
+ * attempt lands on (`viewAfterGeneration`). No plotting or CSV-writing
+ * lives here — the shell renders, the module decides.
  */
 
 import { trajectory, type Trajectory } from "../core";
@@ -148,14 +151,75 @@ export function generationLogLines(outcome: GenerationOutcome): readonly Generat
 }
 
 /**
- * Whether the drawing changed since this generation ran: the exported
- * CSVs must never describe an older drawing, so a stale generation
- * locks the export until the operator regenerates. Compares the
- * generated Trajectory's parts against the live editor state by
- * reference — the immutable reducer replaces `home` and `segments` on
- * every edit that affects the Trajectory.
+ * The main-area view: the drawing canvas, or the charts of the last
+ * successful generation. The shell tabs between these two and keeps
+ * the tab state; the module decides where a generation attempt lands.
  */
-export function generationIsStale(outcome: GenerationOutcome | null, state: EditorState): boolean {
-  if (outcome === null || outcome.kind !== "ok") return false;
-  return outcome.trajectory.home !== state.home || outcome.trajectory.segments !== state.segments;
+export type MainView = "drawing" | "charts";
+
+/**
+ * The main-area view a generation attempt lands on: a successful outcome
+ * opens the refreshed charts of the new plan; a failed or blocked attempt
+ * returns to the drawing — the charts tab locks again (the charts always
+ * show the last *successful* generation), so the operator lands where the
+ * rejected drawing is fixed while the sidebar log names the failure.
+ */
+export function viewAfterGeneration(outcome: GenerationOutcome): MainView {
+  return outcome.kind === "ok" ? "charts" : "drawing";
+}
+
+/**
+ * Why the CSV export is or is not available right now — the one answer
+ * to "can I export right now?". Only the last *successful* Generation
+ * unlocks the export (GLOSSARY.md, Generation), and editing the drawing
+ * afterwards locks it again until the operator regenerates.
+ */
+export type ExportEligibility =
+  | {
+      /** The export may run: both CSVs of the last successful generation. */
+      readonly kind: "eligible";
+      /** The Robot CSV to write. */
+      readonly robotCsv: string;
+      /** The RViz CSV to write. */
+      readonly rvizCsv: string;
+    }
+  | {
+      /** The drawing changed after the last successful generation. */
+      readonly kind: "stale";
+      /** The Russian operator notice: regenerate before exporting. */
+      readonly notice: string;
+    }
+  | {
+      /** No successful generation exists (none yet, failed, or blocked). */
+      readonly kind: "no-success";
+    };
+
+/**
+ * The export eligibility of the live drawing against the last generation
+ * outcome — the one predicate the export button's disabled state and its
+ * notices render from, so the eligibility rule is spelled once, here,
+ * not twice in the shell's JSX. A fresh successful generation is
+ * `eligible` and carries the two CSVs to write; a drawing edited after
+ * its generation is `stale` — the exported CSVs must never describe an
+ * older drawing — with the module's Russian notice; without a successful
+ * generation (none yet, or the last attempt failed or was blocked) the
+ * export stays `no-success`.
+ *
+ * Staleness compares the generated Trajectory's parts against the live
+ * editor state by reference — the immutable reducer replaces `home` and
+ * `segments` on every edit that affects the Trajectory.
+ */
+export function exportEligibility(
+  outcome: GenerationOutcome | null,
+  state: EditorState,
+): ExportEligibility {
+  if (outcome === null || outcome.kind !== "ok") return { kind: "no-success" };
+  const stale = outcome.trajectory.home !== state.home || outcome.trajectory.segments !== state.segments;
+  if (stale) {
+    return {
+      kind: "stale",
+      notice: "Чертёж изменился после генерации — сгенерируйте заново перед экспортом.",
+    };
+  }
+  return { kind: "eligible", robotCsv: outcome.result.robotCsv, rvizCsv: outcome.result.rvizCsv };
 }
