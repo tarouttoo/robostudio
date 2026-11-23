@@ -40,7 +40,18 @@ import {
 } from "./editor";
 
 /** The main area's view: the drawing canvas, or the charts of the last generation. */
-type MainView = "drawing" | "charts";
+export type MainView = "drawing" | "charts";
+
+/**
+ * The main-area view a generation attempt lands on: a successful outcome
+ * opens the refreshed charts of the new plan; a failed or blocked attempt
+ * returns to the drawing — the charts tab locks again (the charts always
+ * show the last *successful* generation), so the operator lands where the
+ * rejected drawing is fixed while the sidebar log names the failure.
+ */
+export function viewAfterGeneration(outcome: GenerationOutcome): MainView {
+  return outcome.kind === "ok" ? "charts" : "drawing";
+}
 
 /**
  * The trajectory editor: the operator picks the Working Plane with its
@@ -57,7 +68,8 @@ type MainView = "drawing" | "charts";
  * main process, and switches the main area to «Графики» — every chart
  * the headless renderer produced from the new Motion Plan (ADR 0013,
  * `ChartsView.tsx`). Regeneration replaces those charts with the new
- * plan's data. UI text is Russian per GLOSSARY.md.
+ * plan's data; a failed or blocked run keeps no charts and returns to
+ * «Чертёж». UI text is Russian per GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
@@ -74,12 +86,12 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const charts = useMemo(() => chartsOf(generation, MIKO_MINI), [generation]);
   const letters = planeAxisLetters(state.plane);
 
-  /** Runs generation on the drawn Trajectory and shows the log; success opens the refreshed charts. */
+  /** Runs generation on the drawn Trajectory and shows the log; success opens the refreshed charts, a failure returns to the drawing. */
   const handleGenerate = (): void => {
     const outcome = runGeneration(state, MIKO_MINI);
     setGeneration(outcome);
     setExportMessage(null);
-    if (outcome.kind === "ok") setView("charts");
+    setView(viewAfterGeneration(outcome));
   };
 
   /** Writes the generated Robot CSV and RViz CSV into a picked folder. */
@@ -456,6 +468,14 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
               Графики
             </button>
           </div>
+          {/* The editor's latest rejection (e.g. an impossible Arc),
+              visible in both views: drawing interactions through the
+              sidebar stay available while «Графики» is open. */}
+          {state.error !== null && (
+            <div style={{ padding: "0.3rem 1rem", fontFamily: "monospace", fontSize: "0.9rem", color: "#b42318" }}>
+              {state.error}
+            </div>
+          )}
           {view === "charts" && charts !== null ? (
             <ChartsView charts={charts} />
           ) : (
@@ -483,9 +503,6 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                   color: "#444",
                 }}
               >
-                {state.error !== null && (
-                  <div style={{ color: "#b42318", marginBottom: "0.2rem" }}>{state.error}</div>
-                )}
                 {cursor === null
                   ? "Курсор: —"
                   : `Курсор: ${letters.u} ${formatMm(cursor.x)} · ${letters.v} ${formatMm(cursor.y)} · фикс. ${letters.w} ${formatMm(state.fixedMm)} мм`}
