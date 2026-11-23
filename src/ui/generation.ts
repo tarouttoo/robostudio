@@ -10,13 +10,25 @@
  * PCHIP Planner is created inside the session from that model, so the
  * app shell holds one stable reference and a second robot is one
  * configuration change at the factory, not edits at every call site.
- * The pipeline is the seam: this module only turns editor state into a
- * Trajectory, runs it, and renders the outcome — no plotting or export
+ * A successful run renders the Charts right there, through the same
+ * headless seam as the pipeline (`renderCharts`, ADR 0013), and the
+ * outcome carries them: the «Графики» view shows exactly the documents
+ * of the last successful Generation, as data — no view-side
+ * re-derivation from plan + model. The pipeline and the chart renderer
+ * are the seams: this module only turns editor state into a Trajectory,
+ * runs it, and hands over the complete outcome — no plotting or export
  * logic lives here.
  */
 
 import { trajectory, type Trajectory } from "../core";
-import { PipelineError, runPipeline, type PipelineResult, type PipelineStage } from "../export";
+import {
+  PipelineError,
+  renderCharts,
+  runPipeline,
+  type PipelineResult,
+  type PipelineStage,
+  type RenderedChart,
+} from "../export";
 import { createPchipPlanner } from "../motion";
 import type { RobotModel } from "../kinematics/robot-model";
 import type { EditorState } from "./editor";
@@ -30,6 +42,13 @@ export type GenerationOutcome =
       readonly trajectory: Trajectory;
       /** The pipeline result: plan, stage outcomes, exported bytes. */
       readonly result: PipelineResult;
+      /**
+       * Every Chart of this Generation (the eight chart kinds, in run
+       * order), rendered at Generation time by the headless renderer
+       * (ADR 0013) from the run's Motion Plan and the session's bound
+       * Robot Model. The «Графики» view shows exactly these documents.
+       */
+      readonly charts: readonly RenderedChart[];
     }
   | {
       /** A validation stage failed and stopped the pipeline. */
@@ -56,7 +75,8 @@ export interface GenerationSession {
    * A `PipelineError` becomes a `failed` outcome; a missing Home Point
    * becomes `blocked` — the pen position before the first Segment is
    * part of the Trajectory itself (GLOSSARY.md), so generation without
-   * it cannot start.
+   * it cannot start. On success the Charts are rendered here, at
+   * Generation time, and carried on the outcome.
    */
   run(state: EditorState): GenerationOutcome;
 }
@@ -80,10 +100,12 @@ export function createGenerationSession(model: RobotModel): GenerationSession {
       }
       const traj = trajectory(state.home, state.segments);
       try {
+        const result = runPipeline({ trajectory: traj, model, planner });
         return {
           kind: "ok",
           trajectory: traj,
-          result: runPipeline({ trajectory: traj, model, planner }),
+          result,
+          charts: renderCharts(result.plan, model),
         };
       } catch (error) {
         if (error instanceof PipelineError) return { kind: "failed", error };

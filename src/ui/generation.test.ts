@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PIPELINE_STAGES, runPipeline } from "../export";
+import { CHART_IDS, PIPELINE_STAGES, renderCharts, runPipeline } from "../export";
 import { line, trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import { createPchipPlanner } from "../motion";
@@ -176,6 +176,48 @@ describe("generation: session", () => {
     const restored = editorReducer(initialEditorState, { type: "loadProject", content });
     const outcome = okOutcome(createGenerationSession(MIKO_MINI), restored);
     expect(outcome.result.plan.rows.length).toBeGreaterThan(50);
+  });
+});
+
+describe("generation: the outcome carries its charts", () => {
+  it("a successful outcome carries every chart document, in run order", () => {
+    const outcome = okOutcome(createGenerationSession(scriptedModel()), stateWith(REACHABLE_LINE));
+    expect(outcome.charts.map((chart) => chart.id)).toEqual([...CHART_IDS]);
+  });
+
+  it("the carried documents are the headless renderer's output for the run's plan and the session's bound model", () => {
+    const model = scriptedModel();
+    const outcome = okOutcome(createGenerationSession(model), stateWith(REACHABLE_LINE));
+    expect(outcome.charts).toEqual(renderCharts(outcome.result.plan, model));
+    // The shipped MiKo-mini configuration renders through its own
+    // bound model the same way.
+    const miko = okOutcome(createGenerationSession(MIKO_MINI), stateWith(REACHABLE_LINE));
+    expect(miko.charts).toEqual(renderCharts(miko.result.plan, MIKO_MINI));
+  });
+
+  it("regeneration replaces the carried charts with the new plan's documents", () => {
+    const session = createGenerationSession(MIKO_MINI);
+    const first = okOutcome(session, stateWith([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]));
+    const second = okOutcome(session, stateWith([line({ start: HOME, end: vec3(180, 0, 60), feed: 20 })]));
+    // Every chart redraws: no document survives the regeneration as-is.
+    expect(second.charts.map((chart) => chart.svg)).not.toEqual(first.charts.map((chart) => chart.svg));
+    // The new data is the new plan's: the time axis labels the longer
+    // plan's duration, not the first run's.
+    const durationMs = Math.max(...second.result.plan.rows.map((row) => row.tMs));
+    const positions = second.charts.find((chart) => chart.id === "joint-positions");
+    if (!positions) throw new Error("expected a joint-positions chart");
+    const tickTexts = [...positions.svg.matchAll(/<text class="tick-x"[^>]*>([^<]*)<\/text>/g)].map((m) => m[1] as string);
+    expect(tickTexts).toContain(String(durationMs));
+  });
+
+  it("failed and blocked outcomes carry no charts", () => {
+    const session = createGenerationSession(scriptedModel());
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
+    expect("charts" in failed).toBe(false);
+    const blocked = session.run({ ...initialEditorState });
+    if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
+    expect("charts" in blocked).toBe(false);
   });
 });
 
