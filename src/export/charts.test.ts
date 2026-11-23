@@ -132,6 +132,16 @@ const ONE_ROW_PLAN: MotionPlan = {
   durationMs: 0,
 };
 
+/**
+ * A zero-row plan: undefined input per the renderer's docs — charts
+ * must render degenerate-but-harmless, never NaN/Infinity.
+ */
+const EMPTY_PLAN: MotionPlan = {
+  rows: [],
+  ranges: oneRange(20, 0, CONTROL_STEP_MS),
+  durationMs: 0,
+};
+
 /** Picks one rendered chart by its stable id. */
 function chartById(charts: readonly RenderedChart[], id: ChartId): RenderedChart {
   const chart = charts.find((c) => c.id === id);
@@ -217,13 +227,38 @@ describe("chart seam", () => {
     }
   });
 
-  it("never emits NaN, Infinity, or undefined, even for a one-row plan", () => {
-    const plans = [plan, X_AT_20_MM_S, ONE_ROW_PLAN];
+  it("never emits NaN, Infinity, or undefined, even for one-row and zero-row plans", () => {
+    const plans = [plan, X_AT_20_MM_S, ONE_ROW_PLAN, EMPTY_PLAN];
     for (const p of plans) {
       for (const chart of renderCharts(p, model)) {
         expect(chart.svg).not.toMatch(/NaN|Infinity|undefined/);
       }
     }
+  });
+
+  it("labels every tick in plain decimal — no exponent noise, no repeated label on an axis", () => {
+    const plans = [plan, X_AT_20_MM_S, TWO_PHASE_PLAN, ONE_ROW_PLAN, EMPTY_PLAN];
+    for (const p of plans) {
+      for (const chart of renderCharts(p, model)) {
+        for (const cls of ["tick-x", "tick-y"]) {
+          const labels = texts(chart.svg, cls);
+          for (const t of labels) {
+            expect(t).toMatch(/^-?\d+(\.\d+)?$/);
+          }
+          expect(new Set(labels).size).toBe(labels.length);
+        }
+      }
+    }
+  });
+
+  it("plots exactly-constant motion as exactly constant: speed 20 mm/s, acceleration 0", () => {
+    const model = identityModel();
+    const speed = chartById(renderCharts(X_AT_20_MM_S, model), "end-effector-velocity").svg;
+    expect(texts(speed, "tick-y")).toContain("20");
+    // Finite differencing of exactly-collinear positions must not
+    // plot a nonsense 10⁻¹²-scale acceleration axis.
+    const accel = chartById(renderCharts(X_AT_20_MM_S, model), "end-effector-acceleration").svg;
+    expect(texts(accel, "tick-y")).toContain("0");
   });
 
   it("is a pure function of the plan and model", () => {
@@ -427,5 +462,20 @@ describe("3D path view", () => {
     // are no per-screen-axis tick labels to carry them.
     expect(texts(svg, "axis-caption").join(" ")).toContain("mm");
     expect(texts(svg, "axis-caption").join(" ")).toContain("equal-aspect");
+  });
+
+  it("keeps the bounding-box wireframe inside the plot frame", () => {
+    const model = defaultModel();
+    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+    const svg = chartById(renderCharts(plan, model), "path-3d").svg;
+    const d = svg.match(/<path class="axes-box" d="([^"]+)"/)![1] as string;
+    const coords = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+    expect(coords.length).toBeGreaterThan(0);
+    for (let i = 0; i + 1 < coords.length; i += 2) {
+      expect(coords[i] as number).toBeGreaterThanOrEqual(64); // MARGIN.left
+      expect(coords[i] as number).toBeLessThanOrEqual(616); // MARGIN.left + PLOT_W
+      expect(coords[i + 1] as number).toBeGreaterThanOrEqual(48); // MARGIN.top
+      expect(coords[i + 1] as number).toBeLessThanOrEqual(354); // MARGIN.top + PLOT_H
+    }
   });
 });

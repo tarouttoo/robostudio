@@ -21,9 +21,11 @@
  *   names, or a chart-specific name) are part of the contract.
  * - Tick and extent labels are `<text class="tick-x|tick-y">`; the
  *   time axis always labels 0 and the plan duration, a value axis
- *   always labels its data extent endpoints.
+ *   always labels its data extent endpoints, and labels are unique
+ *   within an axis.
  * - Numbers print in plain decimal (six significant digits, no
- *   exponent noise, no `-0`); a chart never emits NaN/Infinity.
+ *   exponent noise, no `-0`); a chart never emits NaN/Infinity, even
+ *   for a zero-row plan.
  */
 
 import type { RobotModel, Vec3 } from "../kinematics/robot-model";
@@ -173,20 +175,44 @@ export function renderCharts(plan: MotionPlan, model: RobotModel): readonly Rend
 const DT_S = CONTROL_STEP_MS / 1000;
 
 /**
+ * Speed magnitudes below this (mm/s) are finite-difference noise, not
+ * motion: differencing float positions of order 10³ mm at the 20 ms
+ * row step leaves ~10⁻¹¹ mm/s of rounding residue, so the floor sits
+ * far above the noise and far below any real traverse rate.
+ */
+const SPEED_NOISE_MM_S = 1e-6;
+
+/**
+ * Acceleration magnitudes below this (mm/s²) are finite-difference
+ * noise: a second difference amplifies the same position rounding to
+ * ~10⁻⁸ mm/s², and real accelerations of interest are O(1) and up
+ * (a 20 mm/s velocity step over one row gap is 500 mm/s²).
+ */
+const ACCEL_NOISE_MM_S2 = 1e-3;
+
+/** Replaces magnitudes below a noise floor with exactly zero. */
+function snapNoise(values: readonly number[], floor: number): readonly number[] {
+  return values.map((v) => (Math.abs(v) < floor ? 0 : v));
+}
+
+/**
  * The end-effector speed at every plan row, in mm/s: the magnitude of
  * the reconstructed path's velocity, central-differenced between rows
  * (one-sided at the ends). Speed, not signed velocity: the plotted
  * quantity is how fast the tool moves, and it is what the Feed sets.
+ * Differencing noise is snapped to zero, so exactly-constant motion
+ * plots exactly constant instead of a nonsense 10⁻¹²-scale axis.
  */
 function eeSpeeds(points: readonly Vec3[]): readonly number[] {
   const n = points.length;
   if (n === 0) return [];
   if (n === 1) return [0];
-  return points.map((_, i) => {
+  const speeds = points.map((_, i) => {
     if (i === 0) return vec3Distance(points[1] as Vec3, points[0] as Vec3) / DT_S;
     if (i === n - 1) return vec3Distance(points[i] as Vec3, points[i - 1] as Vec3) / DT_S;
     return vec3Distance(points[i + 1] as Vec3, points[i - 1] as Vec3) / (2 * DT_S);
   });
+  return snapNoise(speeds, SPEED_NOISE_MM_S);
 }
 
 /** The componentwise sum `a + b`. */
@@ -212,12 +238,13 @@ function secondDifference(prev: Vec3, p: Vec3, next: Vec3): Vec3 {
 /**
  * The end-effector acceleration magnitude at every plan row, in mm/s²:
  * the second difference of the reconstructed positions over the row
- * step (one-sided three-point windows at the ends).
+ * step (one-sided three-point windows at the ends). Differencing
+ * noise is snapped to zero, as with the speeds.
  */
 function eeAccelerations(points: readonly Vec3[]): readonly number[] {
   const n = points.length;
   if (n < 3) return points.map(() => 0);
-  return points.map((_, i) => {
+  const accelerations = points.map((_, i) => {
     const window =
       i === 0
         ? [points[0] as Vec3, points[1] as Vec3, points[2] as Vec3]
@@ -226,6 +253,7 @@ function eeAccelerations(points: readonly Vec3[]): readonly number[] {
           : [points[i - 1] as Vec3, points[i] as Vec3, points[i + 1] as Vec3];
     return length(secondDifference(window[0] as Vec3, window[1] as Vec3, window[2] as Vec3)) / (DT_S * DT_S);
   });
+  return snapNoise(accelerations, ACCEL_NOISE_MM_S2);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,11 +262,21 @@ function eeAccelerations(points: readonly Vec3[]): readonly number[] {
 
 /**
  * Formats a data value for a tick or extent label: six significant
- * digits in plain decimal, `-0` normalized to `0`.
+ * digits in plain decimal — exponent notation is expanded, the label
+ * contract forbids it — and `-0` normalized to `0`.
  */
 function fmtNum(v: number): string {
   if (v === 0) return "0";
-  return String(Number(v.toPrecision(6)));
+  const rounded = Number(v.toPrecision(6));
+  if (rounded === 0) return "0";
+  const s = String(rounded);
+  if (!s.includes("e")) return s;
+  // Expand the exponent form: place the six significant digits after
+  // the decimal point (a value ≥ 10²¹ stays an integer string).
+  const exp = Number(s.slice(s.indexOf("e") + 1));
+  const fixed = Math.abs(rounded).toFixed(Math.max(0, 5 - exp));
+  const trimmed = fixed.includes(".") ? fixed.replace(/0+$/, "").replace(/\.$/, "") : fixed;
+  return `${v < 0 ? "-" : ""}${trimmed}`;
 }
 
 /** Formats a pixel coordinate (two decimals, no trailing zeros). */
@@ -250,10 +288,17 @@ function fmtPx(v: number): string {
 // Scales and ticks
 // ---------------------------------------------------------------------------
 
-/** The data domain of an axis; a degenerate (zero-width) domain is padded. */
+/**
+ * The data domain of an axis; a degenerate domain is padded. Degenerate
+ * means zero-width or noise-scale: a span within 10⁻⁹ of the value
+ * magnitude is float residue (e.g. a constant 20 mm/s traverse
+ * computing to 20 ± 2·10⁻¹⁴), not signal, and pads like an exactly
+ * constant series instead of spawning a 10⁻¹⁴-scale tick axis.
+ */
 function domain(min: number, max: number): readonly [number, number] {
-  if (!(max > min)) {
-    const pad = Math.max(Math.abs(min) * 0.05, 1);
+  const magnitude = Math.max(Math.abs(min), Math.abs(max));
+  if (!(max - min > 1e-9 * magnitude)) {
+    const pad = Math.max(magnitude * 0.05, 1);
     return [min - pad, min + pad];
   }
   return [min, max];
@@ -272,15 +317,22 @@ function niceStep(raw: number): number {
 /**
  * The labeled tick values of one axis: nice 1/2/5×10ᵏ steps inside the
  * domain plus the domain endpoints themselves — so the reader always
- * sees the exact plotted extent, and tests can pin it.
+ * sees the exact plotted extent, and tests can pin it. A step that
+ * rounds onto an endpoint (or onto another tick's printed label) is
+ * dropped: every label on an axis is distinct.
  */
 function ticksFor(min: number, max: number): readonly number[] {
   const step = niceStep((max - min) / TARGET_TICKS);
   const ticks = new Set<number>([min, max]);
+  const labels = new Set<string>([fmtNum(min), fmtNum(max)]);
   const count = Math.floor((max - min) / step + 1e-9);
-  for (let k = 0; k <= count; k++) {
+  for (let k = 1; k <= count; k++) {
     const v = Number((min + k * step).toPrecision(12));
-    if (v > min && v < max) ticks.add(v);
+    if (v <= min || v >= max) continue;
+    const label = fmtNum(v);
+    if (labels.has(label)) continue;
+    labels.add(label);
+    ticks.add(v);
   }
   return [...ticks].sort((a, b) => a - b);
 }
@@ -407,14 +459,33 @@ function extentOf(values: readonly number[]): readonly [number, number] {
  * of the motion, with each world axis labeled at its box edge. The
  * projection mixes world axes, so there are no per-screen-axis tick
  * labels; the units live in the caption (mm).
+ *
+ * The view frames the projected bounding box — not the path alone —
+ * so the wireframe, and the path inside it, always stay inside the
+ * plot area. Degenerate extents (a single row, a flat motion, or a
+ * zero-row plan) are padded, so every drawn coordinate stays finite:
+ * a chart never emits NaN/Infinity.
  */
 function path3dChartSvg(title: string, points: readonly Vec3[]): string {
-  const projected = points.map(projectIsometric);
-  const xs = projected.map(([x]) => x);
-  const ys = projected.map(([, y]) => y);
-  const [xLo, xHi] = extentOf(xs);
-  const [yLo, yHi] = extentOf(ys);
-  const scale = Math.min(PLOT_W / Math.max(xHi - xLo, 1e-9), PLOT_H / Math.max(yHi - yLo, 1e-9));
+  // The motion's bounding box, per world axis, padded when degenerate.
+  const padAxis = (axis: 0 | 1 | 2): readonly [number, number] => {
+    if (points.length === 0) return [-1, 1];
+    return domain(Math.min(...points.map((p) => p[axis])), Math.max(...points.map((p) => p[axis])));
+  };
+  const [x0, x1] = padAxis(0);
+  const [y0, y1] = padAxis(1);
+  const [z0, z1] = padAxis(2);
+  const corner = (bits: number): Vec3 => [bits & 1 ? x1 : x0, bits & 2 ? y1 : y0, bits & 4 ? z1 : z0];
+  // Fit to the box's projected extents: the projection is linear, so
+  // the box's projection contains the path's, and the box defines the
+  // largest geometry the view must hold.
+  const projectedCorners = [0, 1, 2, 3, 4, 5, 6, 7].map((bits) => projectIsometric(corner(bits)));
+  const [xLo, xHi] = extentOf(projectedCorners.map(([x]) => x));
+  const [yLo, yHi] = extentOf(projectedCorners.map(([, y]) => y));
+  // Uniform scale: the limiting dimension fills the plot area; the
+  // other is centered. Equal aspect by construction — all three unit
+  // axes project to the same length.
+  const scale = Math.min(PLOT_W / (xHi - xLo), PLOT_H / (yHi - yLo));
   const xCenter = (xLo + xHi) / 2;
   const yCenter = (yLo + yHi) / 2;
   const xScale = linearScale(xCenter - PLOT_W / scale / 2, xCenter + PLOT_W / scale / 2, MARGIN.left, MARGIN.left + PLOT_W);
@@ -426,10 +497,6 @@ function path3dChartSvg(title: string, points: readonly Vec3[]): string {
   parts.push(`<rect class="plot-frame" x="${MARGIN.left}" y="${MARGIN.top}" width="${PLOT_W}" height="${PLOT_H}" fill="none" stroke="#333333"/>`);
 
   // The bounding-box wireframe: eight corners, twelve edges, projected.
-  const [x0, x1] = extentOf(points.map((p) => p[0]));
-  const [y0, y1] = extentOf(points.map((p) => p[1]));
-  const [z0, z1] = extentOf(points.map((p) => p[2]));
-  const corner = (bits: number): Vec3 => [bits & 1 ? x1 : x0, bits & 2 ? y1 : y0, bits & 4 ? z1 : z0];
   const toPx = (p: Vec3): readonly [number, number] => {
     const [mx, my] = projectIsometric(p);
     return [xScale.toPx(mx), yScale.toPx(my)];
@@ -464,7 +531,10 @@ function path3dChartSvg(title: string, points: readonly Vec3[]): string {
     parts.push(text("axis-label-3d", mx + ox, my + oy + 4, axis, 'text-anchor="middle"'));
   }
 
-  const pathPoints = projected.map(([mx, my]) => `${fmtPx(xScale.toPx(mx))},${fmtPx(yScale.toPx(my))}`).join(" ");
+  const pathPoints = points.map((p) => {
+    const [px, py] = toPx(p);
+    return `${fmtPx(px)},${fmtPx(py)}`;
+  }).join(" ");
   parts.push(`<polyline class="series" data-series="path-3d" points="${pathPoints}" fill="none" stroke="${PALETTE[0]}" stroke-width="1.5"/>`);
   parts.push(
     text(
