@@ -265,6 +265,7 @@ function stubCtx(): CanvasRenderingContext2D {
     setTransform: noop,
     fillRect: noop,
     beginPath: noop,
+    rect: noop,
     moveTo: noop,
     lineTo: noop,
     arc: noop,
