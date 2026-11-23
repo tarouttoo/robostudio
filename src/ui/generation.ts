@@ -6,6 +6,10 @@
  * stage names render in Russian per GLOSSARY.md; the stage details are
  * the pipeline's own (English) texts.
  *
+ * The Robot Model is bound once, at session creation (ADR 0008): the
+ * PCHIP Planner is created inside the session from that model, so the
+ * app shell holds one stable reference and a second robot is one
+ * configuration change at the factory, not edits at every call site.
  * The pipeline is the seam: this module only turns editor state into a
  * Trajectory, runs it, and renders the outcome — no plotting or export
  * logic lives here.
@@ -41,32 +45,52 @@ export type GenerationOutcome =
     };
 
 /**
- * Runs generation on the editor's drawing: builds the Trajectory
- * (Home Point + Segments), runs it through the pipeline with the given
- * Robot Model, and reports the outcome. A `PipelineError` becomes a
- * `failed` outcome; a missing Home Point becomes `blocked` — the pen
- * position before the first Segment is part of the Trajectory itself
- * (GLOSSARY.md), so generation without it cannot start.
+ * A bound Generation session: the Robot Model and its Planner bound
+ * once at creation, serving every run from editor state.
  */
-export function runGeneration(state: EditorState, model: RobotModel): GenerationOutcome {
-  if (state.home === null) {
-    return {
-      kind: "blocked",
-      reason:
-        "Генерация невозможна: не задана Исходная точка — укажите её инструментом «Исходная точка».",
-    };
-  }
-  const traj = trajectory(state.home, state.segments);
-  try {
-    return {
-      kind: "ok",
-      trajectory: traj,
-      result: runPipeline({ trajectory: traj, model, planner: createPchipPlanner(model) }),
-    };
-  } catch (error) {
-    if (error instanceof PipelineError) return { kind: "failed", error };
-    throw error;
-  }
+export interface GenerationSession {
+  /**
+   * Runs generation on the drawn Trajectory: builds the Trajectory
+   * (Home Point + Segments) and runs it through the headless pipeline
+   * with the session's Robot Model and Planner, reporting the outcome.
+   * A `PipelineError` becomes a `failed` outcome; a missing Home Point
+   * becomes `blocked` — the pen position before the first Segment is
+   * part of the Trajectory itself (GLOSSARY.md), so generation without
+   * it cannot start.
+   */
+  run(state: EditorState): GenerationOutcome;
+}
+
+/**
+ * Binds the Robot Model exactly once (ADR 0008): creates the PCHIP
+ * Planner from it inside the session and returns the session the app
+ * runs generations through. Runs carry no model or planner at the call
+ * site, and repeated runs share the binding.
+ */
+export function createGenerationSession(model: RobotModel): GenerationSession {
+  const planner = createPchipPlanner(model);
+  return {
+    run: (state: EditorState): GenerationOutcome => {
+      if (state.home === null) {
+        return {
+          kind: "blocked",
+          reason:
+            "Генерация невозможна: не задана Исходная точка — укажите её инструментом «Исходная точка».",
+        };
+      }
+      const traj = trajectory(state.home, state.segments);
+      try {
+        return {
+          kind: "ok",
+          trajectory: traj,
+          result: runPipeline({ trajectory: traj, model, planner }),
+        };
+      } catch (error) {
+        if (error instanceof PipelineError) return { kind: "failed", error };
+        throw error;
+      }
+    },
+  };
 }
 
 /** The Russian UI name of one validation stage, per GLOSSARY.md. */
