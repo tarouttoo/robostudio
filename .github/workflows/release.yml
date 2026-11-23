@@ -10,7 +10,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 # Re-pushing the same tag queues instead of racing the in-flight release.
 concurrency:
@@ -99,6 +99,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # The only job that needs to write: the build legs run third-party
+    # code (npm ci, electron-builder) and get read-only access.
+    permissions:
+      contents: write
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -112,9 +117,10 @@ jobs:
           path: release-artifacts
 
       # The ADR 0009 release carries exactly three artifacts: the Windows
-      # installer, the Windows portable zip, the Linux zip. A different
-      # count means the packaging targets drifted — fail loudly here
-      # instead of attaching a wrong release.
+      # installer, the Windows portable zip, the Linux zip — versioned
+      # names, per the electron-builder config (README documents them). A
+      # different count or a drifted name fails loudly here instead of
+      # attaching a wrong release.
       - name: Check the three artifacts
         run: |
           set -euo pipefail
@@ -124,6 +130,9 @@ jobs:
             ls release-artifacts >&2
             exit 1
           fi
+          ls release-artifacts/*-setup.exe >/dev/null
+          ls release-artifacts/*-win.zip >/dev/null
+          ls release-artifacts/*-linux.zip >/dev/null
           ls -la release-artifacts
 
       - name: Open draft release

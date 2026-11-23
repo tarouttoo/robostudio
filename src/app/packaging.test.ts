@@ -40,6 +40,7 @@ type ReleaseWorkflow = {
     string,
     {
       needs?: string;
+      permissions?: Record<string, string>;
       "runs-on"?: string;
       strategy?: { failFast?: boolean; matrix?: { os?: string[] } };
       steps?: WorkflowStep[];
@@ -138,9 +139,16 @@ describe("release workflow (.github/workflows/release.yml)", () => {
   });
 
   it("stamps the tag version before building so artifact names match the release", () => {
-    const run = runs(buildJob).find((step) => step.includes("npm version"));
-    expect(run).toContain("--no-git-tag-version");
-    expect(run).toContain("${GITHUB_REF_NAME#v}");
+    const steps = runs(buildJob);
+    const stamp = steps.findIndex((step) => step.includes("npm version"));
+    expect(stamp).toBeGreaterThanOrEqual(0);
+    expect(steps[stamp]).toContain("--no-git-tag-version");
+    expect(steps[stamp]).toContain("${GITHUB_REF_NAME#v}");
+    // The load-bearing part of the contract: the stamp happens before the
+    // bundles are built and packaged, or the artifact names carry a stale
+    // package.json version instead of the tag.
+    expect(stamp).toBeLessThan(steps.findIndex((step) => step.includes("npm run build")));
+    expect(stamp).toBeLessThan(steps.findIndex((step) => step.includes("electron-builder")));
   });
 
   it("builds the app bundles, then packages with electron-builder", () => {
@@ -160,6 +168,14 @@ describe("release workflow (.github/workflows/release.yml)", () => {
     expect(upload?.with?.["if-no-files-found"]).toBe("error");
   });
 
+  it("fails the release job unless exactly the three ADR 0009 artifacts arrive, named per the config", () => {
+    const check = runs(releaseJob).find((run) => run.includes("release-artifacts"));
+    expect(check).toContain('"3"');
+    expect(check).toContain("*-setup.exe");
+    expect(check).toContain("*-win.zip");
+    expect(check).toContain("*-linux.zip");
+  });
+
   it("opens a single draft release from every build leg's artifacts", () => {
     expect(releaseJob?.needs).toBe("build");
     const download = (releaseJob?.steps ?? []).find((step) => step.uses?.startsWith("actions/download-artifact@"));
@@ -169,7 +185,12 @@ describe("release workflow (.github/workflows/release.yml)", () => {
     expect(create).toContain("${GITHUB_REF_NAME}");
   });
 
-  it("writes only to contents", () => {
-    expect(workflow.permissions).toEqual({ contents: "write" });
+  it("writes only to contents, and only where writing is needed", () => {
+    // The build legs run third-party code (npm ci, electron-builder) and
+    // stay read-only; only the release job, which runs gh release create,
+    // gets the write it needs.
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(buildJob?.permissions).toBeUndefined();
+    expect(releaseJob?.permissions).toEqual({ contents: "write" });
   });
 });
