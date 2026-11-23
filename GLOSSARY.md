@@ -47,10 +47,14 @@ here.
   in v1.
 - **Exporter (Экспортёр)** — a named output writer.
 - **Chart (График)** — one rendered plot of the Motion Plan: joint
-  angles/velocities/accelerations/jerks over time, the reconstructed
-  cartesian path, end-effector velocity and acceleration, or the 3D
-  path view. Charts render headless as SVG in the export layer
-  (ADR `0013`); path charts are equal-aspect (ADR `0007`).
+  angles/velocities/accelerations/jerks over time (Углы/Скорости/
+  Ускорения/Рывки шарниров по времени), the reconstructed cartesian
+  path (Восстановленный декартов путь), end-effector velocity and
+  acceleration (Скорость/Ускорение рабочего органа по времени), or
+  the 3D path view (Запланированный путь в 3D). Charts render
+  headless as SVG in the export layer (ADR `0013`); path charts are
+  equal-aspect (ADR `0007`); the app shows every chart of the last
+  generation in the «Графики» view.
 - **Robot CSV** — the Exporter output the real robot consumes:
   `t,q1,q2,q3`, milliseconds and radians, 20 ms row step. Format is a
   contract pinned by tests (ADR `0006`).
