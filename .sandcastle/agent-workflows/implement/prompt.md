@@ -63,7 +63,11 @@ before state is real: build the app (`npm run build`), then capture
 
 Implement, build again, and capture the after state to
 `/tmp/evidence/after.png`. The workflow runs under a virtual display (xvfb)
-and uploads `/tmp/evidence/` as an artifact.
+and uploads `/tmp/evidence/` as an artifact. The PNGs live only in that
+artifact: a human cannot open a local path from your text, so reference
+the evidence by linking the run page,
+`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID` —
+never by writing a bare `/tmp/...` path.
 
 # PR BODY
 
@@ -71,7 +75,11 @@ After the final commit, write the pull request body to `{{PR_BODY_PATH}}`:
 
 1. Read `.agents/skills/pr/SKILL.md` and follow it.
 2. Start the body with `Closes #{{ISSUE_NUMBER}}`, then the skill's
-   Summary, Evidence, and Merge Danger sections.
+   Summary, Evidence, and Merge Danger sections. In Evidence, link the
+   workflow run page
+   (`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`)
+   where the `/tmp/evidence/` artifacts live — a local path renders as
+   dead text on GitHub.
 3. End with exactly this line:
 
    Body drafted by the implement agent; audited by the review pass.

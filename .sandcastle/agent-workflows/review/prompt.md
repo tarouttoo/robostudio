@@ -60,6 +60,11 @@ under the workflow's virtual display run
 
     npx electron --no-sandbox scripts/evidence-screenshot.mjs /tmp/evidence/after-review.png
 
+The PNG lives only in this run's uploaded artifact: in your review summary,
+link the run page,
+`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID` —
+never a bare `/tmp/...` path, which renders as dead text on GitHub.
+
 # CONTEXT
 
 Read `GLOSSARY.md`, relevant ADRs, and `.sandcastle/CODING_STANDARDS.md`.
