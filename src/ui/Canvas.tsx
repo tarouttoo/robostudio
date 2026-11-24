@@ -9,11 +9,34 @@ import type { DraftPreview } from "./editor";
 import { drawScene } from "./canvas/draw";
 import type { ReachabilitySampler } from "./canvas/reachability";
 import {
+  DEFAULT_CAMERA,
   backingSize,
+  fitCamera,
   makeCanvasTransform,
-  type CanvasTransform,
+  panCameraBy,
+  zoomAtCamera,
+  type Camera,
   type Viewport,
 } from "./canvas/transform";
+
+/** How much one wheel notch (100 px of deltaY) scales the view, ≈1.22×. */
+const WHEEL_ZOOM_RATE = 0.002;
+
+/** The pointer position in canvas CSS pixels, from a DOM event's client coordinates. */
+function canvasPxOf(el: Element, clientX: number, clientY: number): Vec2 {
+  const rect = el.getBoundingClientRect();
+  return vec2(clientX - rect.left, clientY - rect.top);
+}
+
+/**
+ * The camera that fits a sampler's Reachability zone into `vp`, or the
+ * default camera (origin centred at the drawing scale) when no cell of
+ * the zone is reachable.
+ */
+function zoneCamera(sampler: ReachabilitySampler, vp: Viewport): Camera {
+  const zone = sampler.zoneBounds();
+  return zone !== null ? fitCamera(vp, zone) : DEFAULT_CAMERA;
+}
 
 /** Props of the drawing canvas. */
 export interface CanvasProps {
@@ -46,20 +69,42 @@ export interface CanvasProps {
 /**
  * The drawing canvas: fills its container, re-measures the live
  * viewport on every resize and device-pixel-ratio change, derives the
- * world↔screen transform from it (ADR 0007), and repaints the scene.
- * Clicks are unprojected through the same transform and reported in
- * plane millimetres — the component holds no geometry state itself.
+ * world↔screen transform from the viewport plus the camera (ADR 0007),
+ * and repaints the scene. Clicks are unprojected through the same
+ * transform and reported in plane millimetres — the component holds no
+ * geometry state itself, only the view camera.
+ *
+ * The camera (issue #44) starts fitted to the whole Reachability zone —
+ * like the startup view — and the operator zooms with the wheel
+ * (anchored at the cursor) and pans with a middle-button drag; the
+ * «Вписать зону» button re-fits the zone on demand. The startup fit is
+ * derived from the live viewport during render; the first operator
+ * interaction mints the operator's camera, which then survives resizes
+ * and Working Plane switches.
  */
 export function Canvas(props: CanvasProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewport = useElementViewport(containerRef);
-  // The transform derives only from the viewport, so memoizing on the
-  // measurement keeps its identity stable across unrelated renders —
-  // the paint effect below then fires only on a real scene change.
-  const transform: CanvasTransform | null = useMemo(
-    () => (viewport ? makeCanvasTransform(viewport) : null),
-    [viewport],
+  const [operatorCamera, setOperatorCamera] = useState<Camera | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  // The startup camera, derived during render (no effect, no cascading
+  // renders): the current zone fitted into the live viewport. Until the
+  // operator takes over, a resize or plane switch re-fits, so the whole
+  // zone stays visible.
+  const startupCamera = useMemo(
+    () => (viewport !== null ? zoneCamera(props.reachability, viewport) : null),
+    [viewport, props.reachability],
+  );
+  const camera = operatorCamera ?? startupCamera;
+
+  // The transform derives only from the viewport and the camera, so
+  // memoizing on the two keeps its identity stable across unrelated
+  // renders — the paint effect below then fires only on a real change.
+  const transform = useMemo(
+    () => (viewport && camera ? makeCanvasTransform(viewport, camera) : null),
+    [viewport, camera],
   );
 
   // Repaint whenever the transform or any scene input changes.
@@ -91,21 +136,68 @@ export function Canvas(props: CanvasProps): JSX.Element {
     props.homeStatus,
   ]);
 
+  // Wheel zoom, anchored at the cursor. React's root wheel listener is
+  // passive, so a native non-passive listener is subscribed here — the
+  // only way preventDefault (no page zoom/scroll) actually works.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || viewport === null || camera === null) return;
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const px = canvasPxOf(canvas, e.clientX, e.clientY);
+      const nextPxPerMm = camera.pxPerMm * Math.exp(-e.deltaY * WHEEL_ZOOM_RATE);
+      setOperatorCamera(zoomAtCamera(camera, viewport, nextPxPerMm, px));
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [viewport, camera]);
+
+  // A middle-button drag pans: the drag start's camera moved by the
+  // pointer travel, so the world point under the pointer follows it.
+  const panRef = useRef<{ startPx: Vec2; camera: Camera } | null>(null);
+
+  /** The pointer position in canvas CSS pixels. */
+  const screenPxOf = (e: React.PointerEvent<HTMLCanvasElement>): Vec2 => {
+    return canvasPxOf(e.currentTarget, e.clientX, e.clientY);
+  };
+
   /** Unprojects a pointer event to plane millimetres. */
   const planePointOf = (e: React.PointerEvent<HTMLCanvasElement>): Vec2 | null => {
     if (!transform) return null;
-    const rect = e.currentTarget.getBoundingClientRect();
-    return transform.toWorld(vec2(e.clientX - rect.left, e.clientY - rect.top));
+    return transform.toWorld(screenPxOf(e));
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+    if (e.button === 1 && camera !== null) {
+      e.preventDefault(); // no middle-click autoscroll while panning
+      panRef.current = { startPx: screenPxOf(e), camera };
+      setPanning(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
     if (e.button !== 0) return;
     const uv = planePointOf(e);
     if (uv !== null) props.onPlaneClick(uv);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+    const pan = panRef.current;
+    const px = screenPxOf(e);
+    if (pan !== null && viewport !== null) {
+      const panned = panCameraBy(pan.camera, vec2(px.x - pan.startPx.x, px.y - pan.startPx.y));
+      setOperatorCamera(panned);
+      // The readout must unproject through the camera the operator sees
+      // now, not the previous render's transform (stale by one pan step).
+      props.onCursorMove(makeCanvasTransform(viewport, panned).toWorld(px));
+      return;
+    }
     props.onCursorMove(planePointOf(e));
+  };
+
+  const endPan = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+    if (e.button !== 1) return;
+    panRef.current = null;
+    setPanning(false);
   };
 
   const backing = viewport ? backingSize(viewport) : { width: 300, height: 150 };
@@ -116,15 +208,38 @@ export function Canvas(props: CanvasProps): JSX.Element {
         ref={canvasRef}
         width={backing.width}
         height={backing.height}
-        style={{ display: "block", width: "100%", height: "100%", cursor: "crosshair", touchAction: "none" }}
+        style={{ display: "block", width: "100%", height: "100%", cursor: panning ? "grabbing" : "crosshair", touchAction: "none" }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
         onPointerLeave={() => props.onCursorMove(null)}
         onContextMenu={(e) => {
           e.preventDefault();
           props.onDraftCancel();
         }}
       />
+      <button
+        type="button"
+        title="Показать всю зону достижимости, как при запуске"
+        disabled={viewport === null || camera === null}
+        onClick={() => {
+          if (viewport !== null) setOperatorCamera(zoneCamera(props.reachability, viewport));
+        }}
+        style={{
+          position: "absolute",
+          top: 8,
+          right: 8,
+          padding: "0.25rem 0.6rem",
+          border: "1px solid #bbb",
+          borderRadius: 4,
+          background: "#fff",
+          color: "#333",
+          fontSize: "0.8rem",
+        }}
+      >
+        Вписать зону
+      </button>
     </div>
   );
 }

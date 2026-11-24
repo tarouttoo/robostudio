@@ -57,6 +57,8 @@ function identityModel(dynamicLimits?: {
     id: "identity-test",
     name: "Identity test model",
     joints,
+    // Unused by these tests; the interface requires a finite bound.
+    workspaceRadiusMm: 1000,
     forwardKinematics: (angles) => [angles[0] as number, angles[1] as number, angles[2] as number],
     inverseKinematics: (target) => ({ status: "ok", joints: [...target] as JointAngles }),
   };

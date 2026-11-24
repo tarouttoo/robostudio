@@ -417,6 +417,8 @@ describe("planner seam: sub-step Segments", () => {
       id: "straight-line",
       name: "Straight Line",
       joints,
+      // Unused by these tests; the interface requires a finite bound.
+      workspaceRadiusMm: 1000,
       forwardKinematics: (q) => [q[0]! * 100, q[1]! * 100, q[2]! * 100],
       inverseKinematics: (target) => ({
         status: "ok" as const,

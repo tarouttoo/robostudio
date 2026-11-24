@@ -20,6 +20,34 @@ import { vec2, type Vec2 } from "../../core";
 /** Default drawing scale: CSS pixels per millimetre. */
 export const DEFAULT_PX_PER_MM = 4;
 
+/** Smallest allowed zoom: CSS pixels per millimetre. */
+export const MIN_PX_PER_MM = 0.5;
+
+/** Largest allowed zoom: CSS pixels per millimetre. */
+export const MAX_PX_PER_MM = 20;
+
+/**
+ * The scale and pan offset state of the canvas view (issue #44): what
+ * the viewport shows, independent of the viewport's live size. The
+ * transform (ADR 0007) is a pure function of the viewport plus this
+ * record, so a resize or device-pixel-ratio change cannot move what is
+ * drawn relative to the world — the zoom and pan survive both.
+ */
+export interface Camera {
+  /** Scale: CSS pixels per millimetre, within [MIN, MAX] px/mm. */
+  readonly pxPerMm: number;
+  /** The Working Plane point (mm) shown at the viewport centre — the pan offset. */
+  readonly center: Vec2;
+}
+
+/** The camera matching the pre-issue mapping: origin centred at 4 px/mm. */
+export const DEFAULT_CAMERA: Camera = { pxPerMm: DEFAULT_PX_PER_MM, center: vec2(0, 0) };
+
+/** Clamps a scale into the bounded px/mm range. */
+function clampScale(pxPerMm: number): number {
+  return Math.min(MAX_PX_PER_MM, Math.max(MIN_PX_PER_MM, pxPerMm));
+}
+
 /**
  * The live size of the canvas element in CSS pixels, plus the device
  * pixel ratio at measurement time. Re-measured on every resize; the
@@ -51,22 +79,73 @@ export interface CanvasTransform {
 }
 
 /**
- * Builds the canvas transform for a measured viewport. The world origin
- * sits at the viewport centre; the scale is uniform (one number for both
- * axes), so equal world extents map to equal pixel extents at any
- * viewport size or device pixel ratio.
+ * Builds the canvas transform for a measured viewport and camera. The
+ * camera's centre sits at the viewport centre and the scale is uniform
+ * (one number for both axes), so equal world extents map to equal
+ * pixel extents at any viewport size, camera, or device pixel ratio.
+ * Called without a camera it reproduces the pre-issue mapping
+ * ({@link DEFAULT_CAMERA}), so existing callers are unaffected.
  */
 export function makeCanvasTransform(
   viewport: Viewport,
-  pxPerMm: number = DEFAULT_PX_PER_MM,
+  camera: Camera = DEFAULT_CAMERA,
 ): CanvasTransform {
-  const originX = viewport.widthPx / 2;
-  const originY = viewport.heightPx / 2;
+  const originX = viewport.widthPx / 2 - camera.center.x * camera.pxPerMm;
+  const originY = viewport.heightPx / 2 + camera.center.y * camera.pxPerMm;
   return {
     viewport,
+    pxPerMm: camera.pxPerMm,
+    toScreen: (p) => vec2(originX + p.x * camera.pxPerMm, originY - p.y * camera.pxPerMm),
+    toWorld: (p) => vec2((p.x - originX) / camera.pxPerMm, (originY - p.y) / camera.pxPerMm),
+  };
+}
+
+/**
+ * The camera that fits a Working Plane millimetre rectangle (such as a
+ * Reachability zone's bounds) into the viewport: the scale is the
+ * smaller of the two axis ratios, clamped into the bounded px/mm range,
+ * and the rectangle's centre lands at the viewport centre. A degenerate
+ * (single-point) rectangle fits centred at the clamped scale.
+ */
+export function fitCamera(viewport: Viewport, zone: WorldBounds): Camera {
+  const widthMm = zone.maxU - zone.minU;
+  const heightMm = zone.maxV - zone.minV;
+  const pxPerMm = clampScale(
+    Math.min(viewport.widthPx / widthMm, viewport.heightPx / heightMm),
+  );
+  return {
     pxPerMm,
-    toScreen: (p) => vec2(originX + p.x * pxPerMm, originY - p.y * pxPerMm),
-    toWorld: (p) => vec2((p.x - originX) / pxPerMm, (originY - p.y) / pxPerMm),
+    center: vec2((zone.minU + zone.maxU) / 2, (zone.minV + zone.maxV) / 2),
+  };
+}
+
+/**
+ * Zooms a camera to the given scale, anchored at a viewport pixel: the
+ * world point under `screenPx` stays under it after the zoom, so the
+ * geometry the cursor rests on does not shift. The scale is clamped
+ * into the bounded px/mm range first — the anchor holds at the bounds.
+ */
+export function zoomAtCamera(camera: Camera, viewport: Viewport, pxPerMm: number, screenPx: Vec2): Camera {
+  const nextPxPerMm = clampScale(pxPerMm);
+  const underCursor = makeCanvasTransform(viewport, camera).toWorld(screenPx);
+  return {
+    pxPerMm: nextPxPerMm,
+    center: vec2(
+      underCursor.x - (screenPx.x - viewport.widthPx / 2) / nextPxPerMm,
+      underCursor.y + (screenPx.y - viewport.heightPx / 2) / nextPxPerMm,
+    ),
+  };
+}
+
+/**
+ * Pans a camera by a pointer drag given in CSS pixels: the world point
+ * under the drag start lands at `dPx` after it. Only the centre moves —
+ * a pan never rescales.
+ */
+export function panCameraBy(camera: Camera, dPx: Vec2): Camera {
+  return {
+    pxPerMm: camera.pxPerMm,
+    center: vec2(camera.center.x - dPx.x / camera.pxPerMm, camera.center.y + dPx.y / camera.pxPerMm),
   };
 }
 

@@ -33,7 +33,7 @@ import type {
   PointReachability,
   ReachabilityViolation,
 } from "../../kinematics/reachability";
-import { gridLinesMm } from "./grid";
+import { gridLinesMm, gridStepsMm } from "./grid";
 import { worldBounds, type CanvasTransform } from "./transform";
 import type { DraftPreview } from "../editor";
 
@@ -174,10 +174,13 @@ function drawReachability(
   }
 }
 
-/** Draws the millimetre grid: minor and major lines plus the axes. */
+/** Draws the millimetre grid: minor and major lines plus the axes. The
+ * steps follow the zoom level (gridStepsMm), so a zoomed-out view keeps
+ * readable lines instead of a solid fill hiding the scene beneath. */
 function drawGrid(ctx: CanvasRenderingContext2D, transform: CanvasTransform): void {
   const bounds = worldBounds(transform);
-  const grid = gridLinesMm(bounds);
+  const { minorMm, majorMm } = gridStepsMm(transform.pxPerMm);
+  const grid = gridLinesMm(bounds, minorMm, majorMm);
   const top = transform.toScreen(vec2(0, bounds.maxV)).y;
   const bottom = transform.toScreen(vec2(0, bounds.minV)).y;
   const left = transform.toScreen(vec2(bounds.minU, 0)).x;

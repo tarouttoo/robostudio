@@ -13,6 +13,21 @@ function defaultModel(): RobotModel {
   return model;
 }
 
+/** A model whose workspace is exactly the disc of `radiusMm` around the origin. */
+function discModel(radiusMm: number): RobotModel {
+  return {
+    id: "disc-test",
+    name: "Disc test model",
+    joints: DEFAULT_MIKO_MINI_CONFIG.joints,
+    workspaceRadiusMm: radiusMm,
+    forwardKinematics: () => [0, 0, 0],
+    inverseKinematics: (target) => {
+      const r = Math.hypot(target[0] ?? 0, target[1] ?? 0, target[2] ?? 0);
+      return r <= radiusMm ? { status: "ok", joints: [0, 0, 0] } : { status: "unreachable" };
+    },
+  };
+}
+
 describe("createReachabilitySampler", () => {
   const model = defaultModel();
 
@@ -51,5 +66,34 @@ describe("createReachabilitySampler", () => {
     const sampler = createReachabilitySampler(model, "XZ", 0);
     expect(sampler.statusAt(100, 60)).toBe("ok");
     expect(sampler.statusAt(100, 500)).toBe("unreachable");
+  });
+
+  it("reports the zone bounds: the cell rectangle covering every non-unreachable cell", () => {
+    // Disc workspace of 100 mm on a 5 mm lattice: the classified cells
+    // span lattice indices -20…19 on both axes (centre distance ≤ 100),
+    // so the zone rectangle is exactly [-100, 100] mm on both axes.
+    const sampler = createReachabilitySampler(discModel(100), "XY", 0);
+    expect(sampler.zoneBounds()).toEqual({ minU: -100, maxU: 100, minV: -100, maxV: 100 });
+  });
+
+  it("bounds the real MiKo-mini zone within its workspace radius, covering the reachable cells", () => {
+    const sampler = createReachabilitySampler(model, "XY", 0);
+    const bounds = sampler.zoneBounds();
+    expect(bounds).not.toBeNull();
+    const r = model.workspaceRadiusMm;
+    expect(bounds!.minU).toBeGreaterThanOrEqual(-r);
+    expect(bounds!.maxU).toBeLessThanOrEqual(r);
+    expect(bounds!.minV).toBeGreaterThanOrEqual(-r);
+    expect(bounds!.maxV).toBeLessThanOrEqual(r);
+    // The known reachable point's cell lies inside the reported zone.
+    expect(bounds!.minU).toBeLessThanOrEqual(100);
+    expect(bounds!.maxU).toBeGreaterThanOrEqual(105);
+    // The known unreachable far cell stays outside it.
+    expect(bounds!.maxU).toBeLessThanOrEqual(355);
+  });
+
+  it("reports null for a plane where no cell is reachable", () => {
+    const lifted = createReachabilitySampler(model, "XY", 500);
+    expect(lifted.zoneBounds()).toBeNull();
   });
 });

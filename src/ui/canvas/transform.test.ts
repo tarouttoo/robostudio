@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { planeCoords, planePoint, type WorkingPlane } from "../../core";
 import { vec2 } from "../../core";
-import { backingSize, makeCanvasTransform, worldBounds, type Viewport } from "./transform";
+import {
+  DEFAULT_PX_PER_MM,
+  MAX_PX_PER_MM,
+  MIN_PX_PER_MM,
+  backingSize,
+  fitCamera,
+  makeCanvasTransform,
+  panCameraBy,
+  worldBounds,
+  zoomAtCamera,
+  type Camera,
+  type Viewport,
+} from "./transform";
 
 /** Millimetre tolerance for projection round-trips (sub-nanometre). */
 const ROUND_TRIP_TOLERANCE_MM = 1e-9;
@@ -97,7 +109,7 @@ describe("canvas transform (ADR 0007)", () => {
   });
 
   it("exposes the world bounds of the viewport", () => {
-    const t = makeCanvasTransform(VIEWPORT, 4);
+    const t = makeCanvasTransform(VIEWPORT, { pxPerMm: 4, center: vec2(0, 0) });
     const bounds = worldBounds(t);
     expect(bounds.minU).toBeCloseTo(-100, 9); // 800/2 / 4
     expect(bounds.maxU).toBeCloseTo(100, 9);
@@ -142,5 +154,123 @@ describe("canvas transform (ADR 0007)", () => {
         expect(back.y).toBeCloseTo(click.y, 9);
       }
     }
+  });
+});
+
+const CAMERA_VIEW: Viewport = { widthPx: 800, heightPx: 600, devicePixelRatio: 1 };
+
+describe("camera: scale and pan offset (issue #44)", () => {
+  it("shows the camera centre at the viewport centre", () => {
+    const camera: Camera = { pxPerMm: 3, center: vec2(120, -45) };
+    const t = makeCanvasTransform(CAMERA_VIEW, camera);
+    const centre = t.toScreen(camera.center);
+    expect(centre.x).toBeCloseTo(CAMERA_VIEW.widthPx / 2, 9);
+    expect(centre.y).toBeCloseTo(CAMERA_VIEW.heightPx / 2, 9);
+  });
+
+  it("round-trips world → screen → world through a panned, scaled camera within 1e-9 mm", () => {
+    const camera: Camera = { pxPerMm: 2.5, center: vec2(-88.5, 210.25) };
+    const t = makeCanvasTransform(CAMERA_VIEW, camera);
+    const points = [vec2(0, 0), vec2(300, -120), vec2(-513.75, 44.5), vec2(0.5, -0.5)];
+    for (const p of points) {
+      const back = t.toWorld(t.toScreen(p));
+      expect(back.x).toBeCloseTo(p.x, 9);
+      expect(back.y).toBeCloseTo(p.y, 9);
+    }
+    expect(t.pxPerMm).toBe(2.5);
+  });
+
+  it("keeps the default camera: origin at the viewport centre, 4 px per mm", () => {
+    // Callers without a camera see exactly the pre-issue mapping.
+    const t = makeCanvasTransform(CAMERA_VIEW);
+    expect(t.toScreen(vec2(0, 0))).toEqual(vec2(CAMERA_VIEW.widthPx / 2, CAMERA_VIEW.heightPx / 2));
+    expect(t.toWorld(vec2(CAMERA_VIEW.widthPx / 2, CAMERA_VIEW.heightPx / 2))).toEqual(vec2(0, 0));
+    expect(t.pxPerMm).toBe(DEFAULT_PX_PER_MM);
+  });
+});
+
+describe("fitCamera (issue #44)", () => {
+  it("fits the whole zone into the viewport, centred on it", () => {
+    const zone = { minU: -100, maxU: 300, minV: -50, maxV: 150 }; // 400×200 mm
+    const camera = fitCamera(CAMERA_VIEW, zone);
+    // The limiting axis is u: 800 px / 400 mm = 2 px/mm (v alone allows 3).
+    expect(camera.pxPerMm).toBeCloseTo(2, 9);
+    const t = makeCanvasTransform(CAMERA_VIEW, camera);
+    const corners = [
+      vec2(zone.minU, zone.minV),
+      vec2(zone.maxU, zone.minV),
+      vec2(zone.minU, zone.maxV),
+      vec2(zone.maxU, zone.maxV),
+    ];
+    for (const corner of corners) {
+      const px = t.toScreen(corner);
+      expect(px.x).toBeGreaterThanOrEqual(0);
+      expect(px.x).toBeLessThanOrEqual(CAMERA_VIEW.widthPx);
+      expect(px.y).toBeGreaterThanOrEqual(0);
+      expect(px.y).toBeLessThanOrEqual(CAMERA_VIEW.heightPx);
+    }
+    const centre = t.toScreen(vec2((zone.minU + zone.maxU) / 2, (zone.minV + zone.maxV) / 2));
+    expect(centre.x).toBeCloseTo(CAMERA_VIEW.widthPx / 2, 9);
+    expect(centre.y).toBeCloseTo(CAMERA_VIEW.heightPx / 2, 9);
+  });
+
+  it("clamps the fit scale into the bounded 0.5–20 px/mm range", () => {
+    // Wider than the viewport even at the minimum scale.
+    const wide = fitCamera(CAMERA_VIEW, { minU: -5000, maxU: 5000, minV: -1, maxV: 1 });
+    expect(wide.pxPerMm).toBe(MIN_PX_PER_MM);
+    // Far smaller than the viewport at the maximum scale.
+    const tiny = fitCamera(CAMERA_VIEW, { minU: -1, maxU: 1, minV: -1, maxV: 1 });
+    expect(tiny.pxPerMm).toBe(MAX_PX_PER_MM);
+  });
+
+  it("still centres a degenerate (single-point) zone", () => {
+    const camera = fitCamera(CAMERA_VIEW, { minU: 40, maxU: 40, minV: -10, maxV: -10 });
+    expect(Number.isFinite(camera.pxPerMm)).toBe(true);
+    const px = makeCanvasTransform(CAMERA_VIEW, camera).toScreen(vec2(40, -10));
+    expect(px.x).toBeCloseTo(CAMERA_VIEW.widthPx / 2, 9);
+    expect(px.y).toBeCloseTo(CAMERA_VIEW.heightPx / 2, 9);
+  });
+});
+
+describe("zoomAtCamera (issue #44)", () => {
+  it("keeps the world point under the cursor fixed while zooming", () => {
+    const camera: Camera = { pxPerMm: 2, center: vec2(10, -5) };
+    const px = vec2(513.5, 202.25);
+    const before = makeCanvasTransform(CAMERA_VIEW, camera).toWorld(px);
+    const zoomed = zoomAtCamera(camera, CAMERA_VIEW, 4, px);
+    expect(zoomed.pxPerMm).toBe(4);
+    const after = makeCanvasTransform(CAMERA_VIEW, zoomed).toWorld(px);
+    expect(after.x).toBeCloseTo(before.x, 9);
+    expect(after.y).toBeCloseTo(before.y, 9);
+  });
+
+  it("anchors at the cursor even when the scale clamps at the bounds", () => {
+    const px = vec2(123, 456);
+    const camera: Camera = { pxPerMm: 18, center: vec2(-7.5, 33) };
+    const before = makeCanvasTransform(CAMERA_VIEW, camera).toWorld(px);
+    const inClamped = zoomAtCamera(camera, CAMERA_VIEW, 100, px);
+    expect(inClamped.pxPerMm).toBe(MAX_PX_PER_MM);
+    const afterIn = makeCanvasTransform(CAMERA_VIEW, inClamped).toWorld(px);
+    expect(afterIn.x).toBeCloseTo(before.x, 9);
+    expect(afterIn.y).toBeCloseTo(before.y, 9);
+
+    const outClamped = zoomAtCamera(camera, CAMERA_VIEW, 0.001, px);
+    expect(outClamped.pxPerMm).toBe(MIN_PX_PER_MM);
+    const afterOut = makeCanvasTransform(CAMERA_VIEW, outClamped).toWorld(px);
+    expect(afterOut.x).toBeCloseTo(before.x, 9);
+    expect(afterOut.y).toBeCloseTo(before.y, 9);
+  });
+});
+
+describe("panCameraBy (issue #44)", () => {
+  it("moves the view with the pointer: the world point at the start pixel lands at the offset pixel", () => {
+    const camera: Camera = { pxPerMm: 2, center: vec2(50, 25) };
+    const d = vec2(-137, 42);
+    const panned = panCameraBy(camera, d);
+    expect(panned.pxPerMm).toBe(camera.pxPerMm); // a pan never rescales
+    const worldAtStart = makeCanvasTransform(CAMERA_VIEW, camera).toWorld(vec2(CAMERA_VIEW.widthPx / 2, CAMERA_VIEW.heightPx / 2));
+    const where = makeCanvasTransform(CAMERA_VIEW, panned).toScreen(worldAtStart);
+    expect(where.x).toBeCloseTo(CAMERA_VIEW.widthPx / 2 + d.x, 9);
+    expect(where.y).toBeCloseTo(CAMERA_VIEW.heightPx / 2 + d.y, 9);
   });
 });
