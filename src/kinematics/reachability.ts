@@ -55,27 +55,22 @@ export const SEGMENT_SAMPLE_STEP_MM = 2;
 
 /**
  * Checks one 3D point against the Robot Model. Named status out, never
- * an exception — the drawing UI calls this on every sample.
+ * an exception — the drawing UI calls this on every sample. The
+ * `IKResult` → status mapping is defined once, in
+ * {@link checkPointViolation}; this is its plain-status view.
  */
 export function checkPointReachability(model: RobotModel, p: Vec3): PointReachability {
-  const ik = model.inverseKinematics(p);
-  switch (ik.status) {
-    case "ok":
-      return "ok";
-    case "angle-limit":
-      return "angle-limit";
-    case "unreachable":
-    case "fk-error":
-      return "unreachable";
-  }
+  const violation = checkPointViolation(model, p);
+  return violation === null ? "ok" : violation.status;
 }
 
 /**
  * The Reachability violation at one 3D point, or null when the point
  * admits joint angles within limits. This is the PTP Move check: only
  * arrival at the target is guaranteed, so only the target is checked —
- * the drawing UI uses it for the pending Move preview and the pipeline
- * for the Move endpoints the Discretization emitted.
+ * the drawing UI uses it for the pending Move preview and the committed
+ * Segment walk, and the pipeline's ik stage checks the same Move
+ * endpoints the Discretization emitted.
  */
 export function checkPointViolation(model: RobotModel, p: Vec3): ReachabilityViolation | null {
   const atMm: CoreVec3 = { x: p[0], y: p[1], z: p[2] };
