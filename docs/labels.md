@@ -21,11 +21,13 @@ mattpocock/skills speaks in (`needs-triage`, `needs-info`, `ready-for-agent`,
 
 | Label | Add it to | Starts | Notes |
 |---|---|---|---|
-| `agent:implement` | issues | `agent-implement.yml` | Refuses PRD-shaped issues (sub-issues of their own) / issues that already have an open collaborator PR; a child-of-spec Ticket passes and its parent Spec is pulled in as context. On success labels the new draft PR `agent:review`. |
+| `agent:implement` | issues | `agent-implement.yml` | Routes by issue shape (ADR 0019): a Spec with tickets → the exploration-notes runner (markdown notes on a branch + an exploration comment); a `spec`-marked issue without tickets → the to-tickets runner (AFK decomposition; tickets enter the pipeline immediately); otherwise the classic chain — an agent implements on an isolated branch and opens a draft PR that closes the issue, then labels the PR `agent:review`. |
 | `agent:implement` | PRs | `agent-implement-pr.yml` | Processes review feedback: replies to threads, addresses inline comments, pushes with a lease. |
 | `agent:review` | PRs | `agent-review.yml` | On success marks the PR ready and requests a squash auto-merge (ADR 0011) — held with a comment when the review posted inline comments or CI is not green. |
 | `agent:update-branch` | PRs | `agent-update-branch.yml` | Always resolves merge conflicts with `main`, never aborts. |
 | `agent:explore` | issues | `agent-explore.yml` | Batch triage. See the exception below. |
+| `improvement` | issues | — (marker) | Filed by the improve-architecture button (`agent-improve.yml`, ADR 0019) — the factory's recommendation issues about the codebase itself, at most 5 per run, deduped against open `improvement` issues. Always wait for a human: drive them into the pipeline yourself (`agent:implement`, or `spec` + `agent:implement` to have to-tickets decompose). The button itself is manual: `gh workflow run agent-improve.yml`. |
+| `spec` | issues | — (marker) | Marks an issue as a Spec while it has no sub-issues yet — the shape the preflight can't see. With the marker plus `agent:implement`, the to-tickets runner decomposes it AFK (ADR 0019); once tickets exist, the marker is redundant (sub-issues are the shape) but harmless to keep. |
 
 A failed run labels the subject `agent:blocked` and posts a failure comment
 naming the trigger label to re-add — **retrying means re-adding that label**.
@@ -69,7 +71,7 @@ the pipeline honor that vocabulary
 Create the labels the workflows expect:
 
 ```sh
-for label in "agent:implement" "agent:review" "agent:update-branch" "agent:explore" "agent:in-progress" "agent:blocked" "ready-for-human" "ready-for-agent"; do
+for label in "agent:implement" "agent:review" "agent:update-branch" "agent:explore" "agent:in-progress" "agent:blocked" "ready-for-human" "ready-for-agent" "improvement" "spec"; do
   gh label create "$label" --color d4c5f9 || true
 done
 ```

@@ -39,6 +39,16 @@ export const gh = (args: string[]): string =>
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+/** Append a markdown line to the workflow run's step summary. */
+export const appendSummary = (markdown: string): void => {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (file) {
+    fs.appendFileSync(file, markdown);
+  } else {
+    process.stdout.write(markdown);
+  }
+};
+
 export const writeJson = (filename: string, value: unknown): void => {
   fs.mkdirSync(outputDir(), { recursive: true });
   fs.writeFileSync(
