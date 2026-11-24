@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { arcFromCenter } from "../core/arc";
-import { line, trajectory } from "../core/trajectory";
+import { line, point, trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
@@ -95,6 +95,48 @@ describe("pipeline: stage chain", () => {
     expect(collision?.detail).toMatch(/reserved/i);
     // The no-op never stops the pipeline: export still ran.
     expect(result.robotCsv.length).toBeGreaterThan(0);
+  });
+});
+
+describe("pipeline: chained Points", () => {
+  const model = defaultModel();
+
+  /** A drawing as the Point tool places it: a chain of reachable PTP Moves. */
+  const POINT_CHAIN = trajectory(vec3(80, 0, 60), [
+    point({ target: vec3(0, 113, 60), feed: 30 }),
+    point({ target: vec3(80, 40, 60), feed: 30 }),
+  ]);
+
+  it("runs a chained-Points drawing through every stage and exports the contract CSV", () => {
+    const result = runPipeline({ trajectory: POINT_CHAIN, model, planner: createPchipPlanner(model) });
+
+    expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
+    // The Robot CSV contract (ADR 0006) is untouched: header, one row
+    // per plan row, radians at fixed precision.
+    expect(result.robotCsv.startsWith("t,q1,q2,q3\n")).toBe(true);
+    const dataRows = result.robotCsv.split("\n").length - 2; // header + trailing newline
+    expect(dataRows).toBe(result.plan.rows.length);
+    expect(result.plan.rows.length).toBeGreaterThan(1);
+    // Arrival at the last Move's target in joint space.
+    const [tx, ty] = model.forwardKinematics(result.plan.rows[result.plan.rows.length - 1]!.q);
+    expect(tx).toBeCloseTo(80, 6);
+    expect(ty).toBeCloseTo(40, 6);
+  });
+
+  it("checks Reachability at Move targets only: an unreachable target stops at the ik stage", () => {
+    const outOfReach = trajectory(vec3(80, 0, 60), [
+      point({ target: vec3(0, 113, 60), feed: 30 }),
+      point({ target: vec3(500, 0, 60), feed: 30 }),
+    ]);
+    try {
+      runPipeline({ trajectory: outOfReach, model, planner: createPchipPlanner(model) });
+      throw new Error("expected the pipeline to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PipelineError);
+      const pipelineError = error as PipelineError;
+      expect(pipelineError.stage).toBe("ik");
+      expect(pipelineError.message).toContain("segment 1");
+    }
   });
 });
 

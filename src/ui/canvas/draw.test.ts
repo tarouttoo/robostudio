@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { line, resolveCenterFromRadius, vec2, vec3, type Vec2 } from "../../core";
+import { line, point, resolveCenterFromRadius, vec2, vec3, type Vec2 } from "../../core";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../../kinematics/miko-mini";
 import { checkSegmentReachability } from "../../kinematics/reachability";
 import { createRobotRegistry } from "../../kinematics/registry";
@@ -149,7 +149,7 @@ describe("drawScene", () => {
     const { ctx, ops } = recordingCtx();
     drawScene(ctx, {
       ...baseScene(model),
-      draft: { kind: "line", start: vec2(150, 0) },
+      draft: { kind: "ptp", start: vec2(150, 0) },
       cursor: vec2(250, 0),
       draftViolation: { status: "unreachable", atMm: vec3(170, 0, 0) },
     });
@@ -158,6 +158,103 @@ describe("drawScene", () => {
     expect(dashIndex).toBeGreaterThan(-1);
     const dashedStroke = ops.find((o, i) => i > dashIndex && o.op === "stroke");
     expect(dashedStroke?.strokeStyle).toBe(VIOLATION_COLOR);
+  });
+
+  it("draws a chained Point Move dashed from the previous end to its target", () => {
+    const { ctx, ops } = recordingCtx();
+    const scene = { ...baseScene(model), home: vec3(80, 0, 60), segments: [point({ target: vec3(100, 0, 60), feed: 20 })], violations: [null] };
+    drawScene(ctx, scene);
+    const from = scene.transform.toScreen(vec2(80, 0));
+    const to = scene.transform.toScreen(vec2(100, 0));
+    const dashIndex = ops.findIndex((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0);
+    expect(dashIndex).toBeGreaterThan(-1);
+    const run = ops.slice(dashIndex + 1);
+    const moveTo = run.find((o) => o.op === "moveTo")!;
+    const lineTo = run.find((o) => o.op === "lineTo")!;
+    expect(moveTo.args[0]).toBeCloseTo(from.x, 6);
+    expect(moveTo.args[1]).toBeCloseTo(from.y, 6);
+    expect(lineTo.args[0]).toBeCloseTo(to.x, 6);
+    expect(lineTo.args[1]).toBeCloseTo(to.y, 6);
+    const dashedStroke = run.find((o) => o.op === "stroke");
+    expect(dashedStroke?.strokeStyle).not.toBe(VIOLATION_COLOR);
+  });
+
+  it("chains consecutive Point Moves: each dashed Move starts at the previous target", () => {
+    const { ctx, ops } = recordingCtx();
+    const scene = {
+      ...baseScene(model),
+      home: vec3(80, 0, 60),
+      segments: [point({ target: vec3(20, 0, 60), feed: 20 }), point({ target: vec3(20, 30, 60), feed: 20 })],
+      violations: [null, null],
+    };
+    drawScene(ctx, scene);
+    const dashIndices = ops
+      .map((o, i) => (o.op === "setLineDash" && (o.args[0] as number[]).length > 0 ? i : -1))
+      .filter((i) => i >= 0);
+    expect(dashIndices.length).toBe(2);
+    const second = dashIndices[1]!;
+    const run = ops.slice(second + 1);
+    const moveTo = run.find((o) => o.op === "moveTo")!;
+    const lineTo = run.find((o) => o.op === "lineTo")!;
+    const from = scene.transform.toScreen(vec2(20, 0));
+    const to = scene.transform.toScreen(vec2(20, 30));
+    expect(moveTo.args[0]).toBeCloseTo(from.x, 6);
+    expect(moveTo.args[1]).toBeCloseTo(from.y, 6);
+    expect(lineTo.args[0]).toBeCloseTo(to.x, 6);
+    expect(lineTo.args[1]).toBeCloseTo(to.y, 6);
+  });
+
+  it("flags a violating Point Move in red along its dashed Move", () => {
+    const { ctx, ops } = recordingCtx();
+    const violating = point({ target: vec3(500, 0, 60), feed: 20 });
+    drawScene(ctx, {
+      ...baseScene(model),
+      home: vec3(80, 0, 60),
+      segments: [violating],
+      violations: [checkSegmentReachability(model, violating)],
+    });
+    const dashIndex = ops.findIndex((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0);
+    expect(dashIndex).toBeGreaterThan(-1);
+    const dashedStroke = ops.find((o, i) => i > dashIndex && o.op === "stroke");
+    expect(dashedStroke?.strokeStyle).toBe(VIOLATION_COLOR);
+  });
+
+  it("draws no Move line for a lone Point without a Home Point — only the target cross", () => {
+    const { ctx, ops } = recordingCtx();
+    drawScene(ctx, {
+      ...baseScene(model),
+      home: null,
+      segments: [point({ target: vec3(20, 0, 60), feed: 20 })],
+      violations: [null],
+    });
+    const dashIndex = ops.findIndex((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0);
+    expect(dashIndex).toBe(-1);
+    // The target is still marked.
+    expect(ops.some((o) => o.op === "stroke")).toBe(true);
+  });
+
+  it("draws the pending PTP Move dashed from the chain end to the cursor", () => {
+    const { ctx, ops } = recordingCtx();
+    const scene = {
+      ...baseScene(model),
+      draft: { kind: "ptp" as const, start: vec2(10, 0) },
+      cursor: vec2(30, 0),
+      draftViolation: null,
+    };
+    drawScene(ctx, scene);
+    const from = scene.transform.toScreen(vec2(10, 0));
+    const to = scene.transform.toScreen(vec2(30, 0));
+    const dashIndex = ops.findIndex((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0);
+    expect(dashIndex).toBeGreaterThan(-1);
+    const run = ops.slice(dashIndex + 1);
+    const moveTo = run.find((o) => o.op === "moveTo")!;
+    const lineTo = run.find((o) => o.op === "lineTo")!;
+    expect(moveTo.args[0]).toBeCloseTo(from.x, 6);
+    expect(moveTo.args[1]).toBeCloseTo(from.y, 6);
+    expect(lineTo.args[0]).toBeCloseTo(to.x, 6);
+    expect(lineTo.args[1]).toBeCloseTo(to.y, 6);
+    const dashedStroke = run.find((o) => o.op === "stroke");
+    expect(dashedStroke?.strokeStyle).not.toBe(VIOLATION_COLOR);
   });
 });
 

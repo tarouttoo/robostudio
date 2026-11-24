@@ -6,6 +6,7 @@ import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "./miko-mini";
 import {
   checkPointReachability,
+  checkPointViolation,
   checkSegmentReachability,
 } from "./reachability";
 import { createRobotRegistry } from "./registry";
@@ -127,5 +128,34 @@ describe("checkSegmentReachability", () => {
     if (violation === null) throw new Error("expected a violation");
     expect(violation.status).toBe("unreachable");
     expect(violation.atMm).toEqual({ x: 500, y: 0, z: 60 });
+  });
+
+  it("a PTP Move whose straight path crosses dead ground is fine while its target is reachable", () => {
+    // Only arrival is guaranteed: the check is the target alone. Here
+    // the target sits inside the workspace while the straight line to it
+    // crosses the unreachable zone — a Point Segment must not flag.
+    const target = point({ target: vec3(100, 0, 60), feed });
+    const straight = line({ start: vec3(500, 0, 60), end: vec3(100, 0, 60), feed });
+    expect(checkSegmentReachability(model, target)).toBeNull();
+    expect(checkSegmentReachability(model, straight)).not.toBeNull();
+  });
+});
+
+describe("checkPointViolation", () => {
+  const model = defaultModel();
+
+  it("answers the PTP target check: null when reachable, the detailed violation otherwise", () => {
+    expect(checkPointViolation(model, [100, 0, 60])).toBeNull();
+    const unreachable = checkPointViolation(model, [500, 0, 60]);
+    expect(unreachable?.status).toBe("unreachable");
+    expect(unreachable?.atMm).toEqual({ x: 500, y: 0, z: 60 });
+  });
+
+  it("names the joint and bound of an angle-limit violation", () => {
+    const limited = checkPointViolation(model, [36, 0, 200]);
+    expect(limited?.status).toBe("angle-limit");
+    if (limited?.status !== "angle-limit") return;
+    expect(limited.joint).toBe("q2");
+    expect(limited.bound).toBe("max");
   });
 });

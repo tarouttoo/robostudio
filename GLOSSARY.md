@@ -10,13 +10,22 @@ here.
 - **Segment (Участок)** — one geometric element of a Trajectory. Kinds:
   **Line (Отрезок)**, **Arc (Дуга)**, **Point (Точка)**. Each Segment
   carries its own Feed.
-- **Line (Отрезок)** — a Segment defined by start and end.
+- **Line (Отрезок)** — a Segment defined by start and end. The Line
+  drawing tool has retired (ADR `0016`): Lines remain in the model, in
+  existing Project Files, and in exports, but new drawing places
+  chained Points and Arcs.
 - **Arc (Дуга)** — a Segment defined by Working Plane + start + end +
   direction + radius **R** or center. Direction is **CW (по часовой)** or
   **CCW (против часовой)**. There is no three-point Arc; the center is
   never inferred from a middle click (ADR `0005`).
 - **Point (Точка)** — a Segment that moves the pen to a target without
-  drawing geometry (start a new sub-path).
+  drawing geometry, as a PTP Move from the previous Segment's end (the
+  first from the Home Point). The «Точка» tool places the chain: one
+  click per Point (ADR `0016`).
+- **PTP Move (PTP-перемещение)** — a Point Segment's travel: only
+  arrival at the target is guaranteed — the joints interpolate directly
+  between the endpoint solutions, the canvas draws the Move dashed,
+  and Reachability is checked at the target only (ADR `0016`).
 - **Working Plane (Рабочая плоскость)** — the plane the operator draws on:
   **XY**, **XZ**, or **YZ**, with the third coordinate fixed. CNC
   G17/G18/G19 conventions.

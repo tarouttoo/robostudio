@@ -13,9 +13,13 @@ describe("app shell", () => {
     // Working Plane picker with its fixed-coordinate field.
     expect(html).toContain("Рабочая плоскость");
     expect(html).toContain("фикс. Z");
-    // Tools per GLOSSARY.md: Отрезок (Line) and Исходная точка (Home Point).
-    expect(html).toContain("Отрезок");
+    // Tools per the spec: Точка (chained Points), Дуга, Исходная точка.
+    // The Line and old jump-Point tools have retired: a PTP Move chain
+    // already covers them.
+    expect(html).toContain("Точка");
+    expect(html).toContain("Дуга");
     expect(html).toContain("Исходная точка");
+    expect(html).not.toContain("Отрезок");
     // Undo and clear actions.
     expect(html).toContain("Отменить");
     expect(html).toContain("Очистить");
@@ -28,10 +32,10 @@ describe("app shell", () => {
     expect(html).toContain("<canvas");
   });
 
-  it("starts on the XY plane with the Line tool selected", () => {
+  it("starts on the XY plane with the chained Point tool selected", () => {
     const html = renderToString(<App />);
     expect(html).toMatch(/<input type="radio" name="plane"[^>]*checked[^>]*value="XY"/);
-    expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="line"/);
+    expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="point"/);
   });
 
   it("offers Project File save and open in the Файл проекта section", () => {
