@@ -55,6 +55,13 @@ function scriptedModel(): RobotModel {
     // Unused by these tests; the interface requires a finite bound.
     workspaceRadiusMm: 1000,
     forwardKinematics: (angles: JointAngles) => [angles[0] as number, angles[1] as number, angles[2] as number],
+    chainPoints: (angles: JointAngles) => [
+      [0, 0, 0],
+      [0, 0, 0],
+      [angles[0] as number, 0, 0],
+      [angles[1] as number, 0, 0],
+      [angles[2] as number, 0, 0],
+    ],
     inverseKinematics: (target) =>
       (target[0] ?? 0) > SCRIPTED_REACH_X_MM
         ? { status: "unreachable" }

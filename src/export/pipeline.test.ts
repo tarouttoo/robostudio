@@ -60,6 +60,13 @@ function identityModel(dynamicLimits?: {
     // Unused by these tests; the interface requires a finite bound.
     workspaceRadiusMm: 1000,
     forwardKinematics: (angles) => [angles[0] as number, angles[1] as number, angles[2] as number],
+    chainPoints: (angles) => [
+      [0, 0, 0],
+      [0, 0, 0],
+      [angles[0] as number, 0, 0],
+      [angles[1] as number, 0, 0],
+      [angles[2] as number, 0, 0],
+    ],
     inverseKinematics: (target) => ({ status: "ok", joints: [...target] as JointAngles }),
   };
 }

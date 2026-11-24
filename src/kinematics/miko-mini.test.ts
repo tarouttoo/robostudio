@@ -238,3 +238,62 @@ describe("MiKo-mini interface contract", () => {
     ).toThrow(/3 joint angles/);
   });
 });
+
+describe("MiKo-mini chain points (Motion Preview skeleton)", () => {
+  const model = defaultModel();
+  const { baseHeightMm, upperArmMm, forearmMm, toolOffsetMm } = DEFAULT_MIKO_MINI_CONFIG.geometry;
+
+  it("returns base foot, shoulder, elbow, wrist, and TCP in chain order", () => {
+    // Fully extended forward at q1 = 0: every pivot sits on the +x axis,
+    // at the heights the chain formulas (ADR 0015) place them.
+    const points = model.chainPoints([0, 0, 0]);
+    expect(points.length).toBe(5);
+    const foot = points[0] as readonly number[];
+    const shoulder = points[1] as readonly number[];
+    const elbow = points[2] as readonly number[];
+    const wrist = points[3] as readonly number[];
+    const tcp = points[4] as readonly number[];
+    expect(foot).toEqual([0, 0, 0]);
+    expect(shoulder[0]).toBeCloseTo(0, 9);
+    expect(shoulder[1]).toBeCloseTo(0, 9);
+    expect(shoulder[2]).toBeCloseTo(baseHeightMm, 9);
+    expect(elbow[0]).toBeCloseTo(upperArmMm, 9);
+    expect(elbow[1]).toBeCloseTo(0, 9);
+    expect(elbow[2]).toBeCloseTo(baseHeightMm, 9);
+    expect(wrist[0]).toBeCloseTo(upperArmMm + forearmMm, 9);
+    expect(wrist[2]).toBeCloseTo(baseHeightMm, 9);
+    expect(tcp[0]).toBeCloseTo(upperArmMm + forearmMm + toolOffsetMm, 9);
+    // The last chain point is the end-effector itself.
+    const fk = model.forwardKinematics([0, 0, 0]);
+    expect(tcp[0]).toBeCloseTo(fk[0], 9);
+    expect(tcp[1]).toBeCloseTo(fk[1], 9);
+    expect(tcp[2]).toBeCloseTo(fk[2], 9);
+  });
+
+  it("rotates the whole planar skeleton with the base joint q1", () => {
+    // At q1 = π/2 the extended arm stands along +y instead of +x.
+    const points = model.chainPoints([Math.PI / 2, 0, 0]);
+    const elbow = points[2] as readonly number[];
+    const tcp = points[4] as readonly number[];
+    expect(elbow[0]).toBeCloseTo(0, 9);
+    expect(elbow[1]).toBeCloseTo(upperArmMm, 9);
+    expect(tcp[1]).toBeCloseTo(upperArmMm + forearmMm + toolOffsetMm, 9);
+  });
+
+  it("bends the elbow into the vertical plane at a raised shoulder", () => {
+    // q2 = π/2, q3 = −π/2: upper arm straight up, forearm horizontal out.
+    const points = model.chainPoints([0, Math.PI / 2, -Math.PI / 2]);
+    const shoulder = points[1] as readonly number[];
+    const elbow = points[2] as readonly number[];
+    const wrist = points[3] as readonly number[];
+    expect(elbow[0]).toBeCloseTo(0, 9);
+    expect(elbow[2]).toBeCloseTo(baseHeightMm + upperArmMm, 9);
+    expect(wrist[0]).toBeCloseTo(forearmMm, 9);
+    expect(wrist[2]).toBeCloseTo(baseHeightMm + upperArmMm, 9);
+    expect(shoulder[2]).toBeCloseTo(baseHeightMm, 9);
+  });
+
+  it("rejects joint arrays of the wrong length like FK does", () => {
+    expect(() => model.chainPoints([0, 0])).toThrow(/3 joint angles/);
+  });
+});

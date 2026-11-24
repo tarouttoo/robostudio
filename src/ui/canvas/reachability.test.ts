@@ -21,6 +21,13 @@ function discModel(radiusMm: number): RobotModel {
     joints: DEFAULT_MIKO_MINI_CONFIG.joints,
     workspaceRadiusMm: radiusMm,
     forwardKinematics: () => [0, 0, 0],
+    chainPoints: () => [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ],
     inverseKinematics: (target) => {
       const r = Math.hypot(target[0] ?? 0, target[1] ?? 0, target[2] ?? 0);
       return r <= radiusMm ? { status: "ok", joints: [0, 0, 0] } : { status: "unreachable" };

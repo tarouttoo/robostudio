@@ -187,6 +187,32 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
     return { status: "ok", joints: solution };
   };
 
+  /**
+   * The skeleton the Motion Preview draws: base foot, shoulder, elbow,
+   * wrist, TCP — the planar pair (q2, q3) unfolds in the vertical plane
+   * rotated by q1 about +Z, the tool extends the forearm's radial
+   * direction (ADR 0015). The last point is exactly FK's result.
+   */
+  const chainPoints = (angles: readonly number[]): readonly Vec3[] => {
+    const tcp = forwardKinematics(angles); // also validates the angle count
+    const q1 = angles[0] as number;
+    const q2 = angles[1] as number;
+    const q3 = angles[2] as number;
+    const dirX = Math.cos(q1);
+    const dirY = Math.sin(q1);
+    const elbowR = l1 * Math.cos(q2);
+    const elbowZ = baseHeightMm + l1 * Math.sin(q2);
+    const wristR = elbowR + l2 * Math.cos(q2 + q3);
+    const wristZ = elbowZ + l2 * Math.sin(q2 + q3);
+    return [
+      [0, 0, 0],
+      [0, 0, baseHeightMm],
+      [dirX * elbowR, dirY * elbowR, elbowZ],
+      [dirX * wristR, dirY * wristR, wristZ],
+      tcp,
+    ];
+  };
+
   return {
     status: "ok",
     model: {
@@ -198,6 +224,7 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
       // can sit from the model origin — a rigorous workspace bound.
       workspaceRadiusMm: baseHeightMm + upperArmMm + forearmMm + toolOffsetMm,
       forwardKinematics,
+      chainPoints,
       inverseKinematics,
     },
   };

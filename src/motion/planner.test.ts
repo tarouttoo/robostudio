@@ -420,6 +420,13 @@ describe("planner seam: sub-step Segments", () => {
       // Unused by these tests; the interface requires a finite bound.
       workspaceRadiusMm: 1000,
       forwardKinematics: (q) => [q[0]! * 100, q[1]! * 100, q[2]! * 100],
+      chainPoints: (q) => [
+        [0, 0, 0],
+        [0, 0, 0],
+        [q[0]! * 100, 0, 0],
+        [q[1]! * 100, 0, 0],
+        [q[2]! * 100, 0, 0],
+      ],
       inverseKinematics: (target) => ({
         status: "ok" as const,
         joints: [target[0]! / 100, target[1]! / 100, target[2]! / 100],
