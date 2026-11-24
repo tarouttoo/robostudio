@@ -27,26 +27,32 @@ is always the human's call.
 
 ## 1. Write issues the pipeline can act on
 
-The implement workflow is gated by a preflight that refuses issues it can't
-handle. Before labelling, check the issue is:
+Adding `agent:implement` routes by issue shape (ADR 0019). Check the issue
+is one of the three shapes before labelling:
 
-- **A Ticket, not a Spec** — it has no sub-issues of its own. A PRD-shaped
-  issue (one with sub-issues) is refused outright with `agent:blocked`;
-  label its sub-issue Tickets instead. A Ticket may sit under a parent
-  Spec: the implement pass pulls the parent Spec in as context, so keep
-  the big picture on the parent and the one change on the Ticket.
-- **One change per issue** — the agent opens one draft PR per issue and the
-  PR body starts with `Closes #N`, so splitting unrelated asks into
-  separate issues keeps the loop clean.
+- **A standalone Ticket** — no sub-issues, no `spec` label: the classic
+  chain. The agent implements it on an isolated branch and opens a draft
+  PR that closes the issue.
+- **A Spec with Tickets** — it has sub-issues: the factory explores it and
+  saves notes; the Tickets flow separately (see the v2 flow in the
+  README). Don't implement a Spec directly.
+- **A `spec`-marked issue without Tickets** — label it `spec` +
+  `agent:implement` and the to-tickets runner decomposes it AFK: Tickets
+  get `ready-for-agent` immediately and the cascade starts. Brakes: close
+  a Ticket or remove its label.
+
+For every shape:
+
+- **One change per Ticket** — a Ticket is small enough for one implement
+  run; splitting unrelated asks into separate issues keeps the loop clean.
 - **Self-contained** — the issue body is the agent's spec: repro steps for
   bugs, expected behaviour, constraints. Anything an implementer would need
   to ask you belongs in the issue before you label it.
-- **Not already covered** — an issue with an open collaborator PR is
-  refused; close the existing PR first if you want a fresh run.
+- **Not already covered** — a standalone issue with an open collaborator PR
+  is refused; close the existing PR first if you want a fresh run.
 
 A refusal comments on the issue explaining why and removes the trigger
-label; the PRD-shaped refusal also adds `agent:blocked`. Fix
-what the comment names and re-add `agent:implement`.
+label. Fix what the comment names and re-add `agent:implement`.
 
 ## 2. Hand an issue to an agent
 

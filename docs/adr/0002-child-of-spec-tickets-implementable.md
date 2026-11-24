@@ -12,6 +12,12 @@ upstream's local parallel-planner prompt ("If it has a parent PRD, pull
 that in too", pinned `a53e227`) — behavior upstream's CI workflow never
 reached because of its own refusal.
 
+> **Superseded in part by [ADR 0019](0019-adopt-software-factory-part-two.md):**
+> the preflight now routes by issue shape instead of refusing PRD-shaped
+> issues, and child-of-spec Tickets ship without a PR in the v2 flow. The
+> parent-Spec-as-context mechanism below is unchanged (though issue bodies
+> now come through `--json body`, not `--comments`).
+
 ## Considered options
 
 - **Keep refusing all sub-issues** — rejected: makes Spec → Ticket triage
