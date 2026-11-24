@@ -22,7 +22,10 @@ Read the project's domain and architecture docs before changing code:
 
 - `GLOSSARY.md`
 - `docs/adr/` if relevant
-- `.sandcastle/CODING_STANDARDS.md`
+
+Coding standards are deliberately not listed here: making it work is the
+implement pass's whole job — the review pass applies the standards
+(ADR 0019, course lessons 40 + 82).
 
 Explore the repo and relevant tests before editing.
 
