@@ -310,10 +310,11 @@ export function renderMotionPreviewFrames(input: MotionPreviewInput): readonly M
   const trajectoryPrimitives = trajectoryPrimitivesOf(segmentPixels, ptpSegments, toPx);
 
   return sampledRows.map((row, frameIndex) => {
+    const chainMm = chains[frameIndex] as Vec3[];
     const primitives = [...trajectoryPrimitives];
-    appendTravelled(primitives, input.plan, row.tMs, segmentPixels, ptpSegments);
+    appendTravelled(primitives, input.plan, row.tMs, chainMm[chainMm.length - 1] as Vec3, segmentPixels, ptpSegments);
     appendTrace(primitives, traceRuns, frameIndex, tcpPixels);
-    const chainPx = (chains[frameIndex] as Vec3[]).map(toPx);
+    const chainPx = chainMm.map(toPx);
     primitives.push({ kind: "solid", points: chainPx, colorIndex: MOTION_PREVIEW_COLORS.robot, width: 2 });
     primitives.push({
       kind: "dot",
@@ -429,19 +430,46 @@ function trajectoryPrimitivesOf(
 }
 
 /**
+ * Index of the polyline sample nearest `p` (3D millimetres, squared
+ * distance — no sqrt needed for an argmin).
+ */
+function nearestSample(polyline: SegmentPolyline, p: Vec3): number {
+  let nearest = 0;
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < polyline.mm.length; i++) {
+    const s = polyline.mm[i] as Vec3;
+    const dx = s[0] - p[0];
+    const dy = s[1] - p[1];
+    const dz = s[2] - p[2];
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < best) {
+      best = d;
+      nearest = i;
+    }
+  }
+  return nearest;
+}
+
+/**
  * Appends the travelled-part highlight: for every plan range, the
- * drawn polyline up to the pen's progress at `tMs` (the range's time
- * fraction; the S-curve profile paces it). A PTP Move contributes no
- * highlight — only arrival is guaranteed, and the travelled reality is
- * the TCP trace. Completion is judged against `min(endMs,
- * durationMs)`: the grid-rounded `durationMs` can sit one control step
- * short of the last range's unrounded end, and the final frame must
- * still show the journey complete.
+ * drawn polyline up to where the pen actually is at `tMs` — the drawn
+ * sample nearest the frame's forward-kinematics TCP (`tcpMm`). LIN
+ * Moves track the drawn geometry exactly (ADR 0017), so the highlight
+ * always ends where the frame's TCP marker sits, whatever pace the
+ * Motion Profile keeps inside the range (the S-curve is nonlinear in
+ * time, so a time-fraction cut would visibly lead or trail the pen —
+ * the same honesty the PTP trace is drawn for, ADR 0016). A PTP Move
+ * contributes no highlight — only arrival is guaranteed, and the
+ * travelled reality is the TCP trace. Completion is judged against
+ * `min(endMs, durationMs)`: the grid-rounded `durationMs` can sit one
+ * control step short of the last range's unrounded end, and the final
+ * frame must still show the journey complete.
  */
 function appendTravelled(
   primitives: PreviewPrimitive[],
   plan: MotionPlan,
   tMs: number,
+  tcpMm: Vec3,
   segmentPixels: ReadonlyMap<number, SegmentPolyline>,
   ptp: ReadonlySet<number>,
 ): void {
@@ -454,8 +482,7 @@ function appendTravelled(
     if (tMs >= completeAt - TIME_SLACK_MS) {
       count = polyline.px.length;
     } else if (tMs > range.startMs) {
-      const fraction = (tMs - range.startMs) / (range.endMs - range.startMs);
-      count = 1 + Math.floor(fraction * (polyline.px.length - 1));
+      count = nearestSample(polyline, tcpMm) + 1;
     } else {
       continue;
     }

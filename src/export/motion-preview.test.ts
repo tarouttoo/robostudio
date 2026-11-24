@@ -145,6 +145,43 @@ describe("motion preview frame geometry", () => {
     expect(highlighted[highlighted.length - 1]).toEqual(traj[traj.length - 1]);
   });
 
+  it("highlights up to the pen's actual position mid-range, not the time fraction", () => {
+    // Rows whose FK TCP sits exactly on the drawn line at known spots:
+    // the honest highlight endpoint is where the TCP marker is, whatever
+    // pace the Motion Profile keeps (a time-fraction cut at t = 40 ms of
+    // a 120 ms range would sit at ⅓ of the polyline — ahead of the pen).
+    const qAt = (x: number): readonly number[] => {
+      const ik = model.inverseKinematics([x, 0, 100]);
+      if (ik.status !== "ok") throw new Error(`unreachable target x=${x}`);
+      return ik.joints;
+    };
+    const plan = craftedPlan(
+      [
+        row(0, qAt(200)),
+        row(20, qAt(212.5)),
+        row(40, qAt(225)),
+        row(60, qAt(237.5)),
+        row(80, qAt(250)),
+        row(100, qAt(262.5)),
+      ],
+      { segmentIndex: 0, feed: 100, startMs: 0, endMs: 120 },
+      100,
+    );
+    const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan, model });
+    const mid = frames[2] as MotionPreviewFrame; // t = 40 ms, pen at x = 225
+    const highlight = polylines(mid, MOTION_PREVIEW_COLORS.travelled, "solid");
+    expect(highlight.length).toBe(1);
+    const pts = highlight[0] as readonly (readonly [number, number])[];
+    const tcpDot = mid.primitives.find(
+      (p) => p.kind === "dot" && p.colorIndex === MOTION_PREVIEW_COLORS.tcp,
+    )!.points[0] as readonly [number, number];
+    const end = pts[pts.length - 1] as readonly [number, number];
+    // The highlight ends at the pen: within ~2 px of the TCP marker
+    // (nearest 0.5 mm polyline sample + pixel rounding).
+    const distPx = Math.hypot(end[0] - tcpDot[0], end[1] - tcpDot[1]);
+    expect(distPx).toBeLessThanOrEqual(2);
+  });
+
   it("marks the Home Point in every frame at the home's projected pixel", () => {
     const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
     const home2 = iso([200, 0, 100]);
