@@ -156,10 +156,30 @@ where it deliberately diverges:
    upstream sandcastle lacks it; it is what lets the skills' to-spec /
    to-tickets flow feed the pipeline without manual relabelling
    ([ADR 0010](docs/adr/0010-ready-for-agent-converter.md)).
+3. **Course alignment (Software Factory Part One)** — features adopted from
+   the course's section 06 that current upstream lacks: evidence
+   screenshots (`/tmp/evidence/` + `upload-artifact` + xvfb via
+   `scripts/evidence-screenshot.mjs`), the review summary's "Rules this
+   review wanted and could not find" capture, the manual `/retro` loop
+   ([docs/agents/retro.md](docs/agents/retro.md)), and the skill-driven,
+   fix-every-finding review prompt (the `code-review` skill is vendored
+   under `.agents/skills/`; upstream's workflow prompt is the conservative
+   inline one)
+   ([ADR 0014](docs/adr/0014-align-factory-with-software-factory-part-one.md)).
+4. **Auto-merge gate requires a two-way door** — a clean review and green
+   CI additionally require the PR body's Merge Danger to declare
+   `**Door:** two-way`; blast radius and migrations stay prose, verified by
+   the review's body audit
+   ([ADR 0014](docs/adr/0014-align-factory-with-software-factory-part-one.md),
+   tightening [ADR 0011](docs/adr/0011-auto-merge-after-clean-review.md)).
+5. **`AGENT_PAT`** plays the role the course calls `FACTORY_PAT`: a
+   fine-grained PAT whose label applications fire the chained workflows.
 
 ## Attribution
 
 Pipeline files ported from
 [mattpocock/sandcastle](https://github.com/mattpocock/sandcastle)
 @ `a53e227250fb51df0ad54155b85fecc1c090c937` — © Matt Pocock, MIT.
+The vendored `pr` and `code-review` agent skills come from Matt Pocock's
+skills pack — © Matt Pocock, MIT.
 Template scaffolding — © tarouttoo, MIT. See `LICENSE`.

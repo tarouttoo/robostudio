@@ -68,3 +68,17 @@ here.
 - **Project File (Файл проекта)** — versioned JSON (`schemaVersion`)
   storing Working Plane, Home Point, Segments, and view settings; the
   canonical save/load format.
+
+## Software factory
+
+Factory vocabulary (English only; used in workflows, docs and issues —
+see `docs/agents/`):
+
+- **Retro (Ретро)** — a human-invoked retrospective over factory runs
+  (Actions run URLs in, factory-improvement PR out); harvests the review's
+  "Rules this review wanted and could not find" into checks or standards.
+  See `docs/agents/retro.md` (ADR `0014`). Never runs per ticket.
+- **Evidence (Доказательства)** — the artifacts a run attaches to prove its
+  claims: command output for code claims, before/after screenshots
+  (`/tmp/evidence/`, uploaded as workflow artifacts) for UI claims.
+  Audited by the reviewer.

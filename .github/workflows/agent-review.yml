@@ -25,6 +25,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       BRANCH: ${{ github.event.pull_request.head.ref }}
       BRANCH_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_REF: main
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       # Provider/model config lives here, not in code (tune cost and quality
@@ -69,11 +70,26 @@ jobs:
       - name: Install pi CLI
         run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
+      # The evidence prompt has the reviewer screenshot its own fixes;
+      # Electron needs a display even headless, hence xvfb (ADR 0014).
+      - name: Install xvfb for UI evidence
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
       - name: Run review agent
         env:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           OUTPUT_DIR: ${{ runner.temp }}
         run: npx tsx .sandcastle/agent-workflows/review/review.ts
+
+      - name: Upload evidence screenshots
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-pr-${{ github.event.pull_request.number }}
+          path: /tmp/evidence
+          if-no-files-found: ignore
 
       - name: Push branch
         if: success()
@@ -102,9 +118,11 @@ jobs:
         if: success()
         run: gh pr ready "$PR_NUMBER" || true
 
-      # The human merge click, automated (ADR 0011): a clean review — zero
-      # inline comments in the extracted payload — requests a squash
-      # auto-merge, which GitHub performs as soon as the PR is mergeable.
+      # The human merge click, automated (ADR 0011), tightened by the
+      # course's merge criteria (ADR 0014): a clean review — zero inline
+      # comments in the extracted payload — plus a body-declared two-way
+      # door requests a squash auto-merge, which GitHub performs as soon as
+      # the PR is mergeable.
       # The request rides AGENT_PAT when present: GITHUB_TOKEN-authored PRs
       # refuse auto-merge requests from their own GITHUB_TOKEN, and the PAT
       # keeps the eventual merge attributed to the maintainer, not
@@ -123,6 +141,18 @@ jobs:
           if [ "$findings" -gt 0 ]; then
             echo "Review posted $findings inline comment(s) — holding the merge."
             gh pr comment "$PR_NUMBER" --body "Review posted **$findings** inline comment(s) — auto-merge held. Address them (label the PR \`agent:implement-pr\`), then re-add \`agent:review\`."
+            exit 0
+          fi
+          # Course lesson 73 criteria (ADR 0014): only two-way-door PRs
+          # merge automatically. The body's Merge Danger section declares
+          # the door; blast radius and migrations stay prose, verified by
+          # the review's body audit rather than parsed here.
+          door=$(gh pr view "$PR_NUMBER" --json body --jq .body \
+            | grep -ioE '\*\*Door:\*\*[[:space:]]*[a-z-]+' \
+            | tail -n1 | sed 's/.*://; s/[[:space:]]*//g')
+          if [ "$door" != "two-way" ]; then
+            echo "PR does not declare Door: two-way — holding the merge."
+            gh pr comment "$PR_NUMBER" --body "Auto-merge held: the Merge Danger section does not declare \`**Door:** two-way\` (declared: \`${door:-none}\`). Correct the PR body — or the change itself — then re-add \`agent:review\`."
             exit 0
           fi
           # CI gate: the merge requests ride a PAT that can bypass a future

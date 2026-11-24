@@ -20,9 +20,15 @@ import { runWithExtraction } from "../shared/run-with-extraction";
 
 const PR_NUMBER = required("PR_NUMBER");
 const BRANCH = required("BRANCH");
+// The review's fixed point (course contract: `origin/{{BASE_REF}}`).
+const BASE_REF = process.env.BASE_REF ?? "main";
 
 try {
   const context = fetchPullRequestContext(PR_NUMBER);
+
+  // The code-review skill invocation names this path as the spec; write it
+  // even when no issue is linked, so the path always exists.
+  fs.writeFileSync("/tmp/review-spec.md", context.linkedIssue);
 
   const result = await runWithExtraction({
     name: `review-pr-${PR_NUMBER}`,
@@ -33,11 +39,10 @@ try {
     promptArgs: {
       PR_NUMBER,
       BRANCH,
+      BASE_REF,
       PR_TITLE: context.prTitle,
       ISSUE_NUMBER: context.issueNumber || "(none)",
       ISSUE_TITLE: context.issueTitle || "(no linked issue)",
-      LINKED_ISSUE: context.linkedIssue,
-      DIFF_TO_MAIN: context.diff,
       PR_COMMENTS_JSON: context.prCommentsJson,
     },
     output: sandcastle.Output.object({

@@ -42,11 +42,25 @@ Run `npm run typecheck` before committing. Run focused tests where relevant.
 # COMMIT
 
 Make one or more commits on `{{BRANCH}}` with conventional commit messages.
+Finish with at least one commit and a clean working tree. The workflow
+pushes and opens the pull request.
 
 Do not push the branch.
 Do not close the issue.
 Do not edit labels.
 Do not create or edit PRs.
+
+# EVIDENCE
+
+When the change shows in the UI, save a before and an after screenshot as
+PNGs in `/tmp/evidence/`. The branch matches `main` before you edit, so the
+before state is real: build the app (`npm run build`), then capture
+
+    npx electron --no-sandbox scripts/evidence-screenshot.mjs /tmp/evidence/before.png
+
+Implement, build again, and capture the after state to
+`/tmp/evidence/after.png`. The workflow runs under a virtual display (xvfb)
+and uploads `/tmp/evidence/` as an artifact.
 
 # PR BODY
 

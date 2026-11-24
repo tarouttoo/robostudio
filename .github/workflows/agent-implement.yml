@@ -138,6 +138,14 @@ jobs:
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
         run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
+      # The evidence prompt has the agent screenshot the UI; Electron needs a
+      # display even headless, hence xvfb (ADR 0014).
+      - name: Install xvfb for UI evidence
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
       - name: Run implementation agent
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
         env:
@@ -146,6 +154,14 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}
           PARENT_NUMBER: ${{ steps.shape.outputs.parent_number }}
         run: npx tsx .sandcastle/agent-workflows/implement/implement.ts
+
+      - name: Upload evidence screenshots
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-issue-${{ github.event.issue.number }}
+          path: /tmp/evidence
+          if-no-files-found: ignore
 
       - name: Push branch
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()

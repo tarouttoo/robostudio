@@ -7,7 +7,7 @@ Do not include text outside the `<output>` block.
 ```json
 <output>
 {
-  "summary": "1-3 paragraphs explaining your review, including what you changed or why it was already clean.",
+  "summary": "1-3 paragraphs summarizing the review: what you fixed, one line of reasoning per axis (Standards, Spec), and what you left for the human. End with a section titled 'Rules this review wanted and could not find' — a bullet list of rules you wanted to apply but could not find in the standards ('None.' when empty). Do not repeat inline comments here.",
   "inlineComments": [
     { "path": "relative/file.ts", "line": 123, "body": "Markdown comment" }
   ],
