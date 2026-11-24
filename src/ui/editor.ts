@@ -64,6 +64,10 @@ export const DEFAULT_ARC_RADIUS_MM = 10;
 /** A click closer than this to the draft start cannot be an Arc center, in mm. */
 const CENTER_EPS_MM = 1e-6;
 
+/** Readable rejection for an Arc with no chain start (no Home Point, nothing drawn). */
+const NO_CHAIN_START_MESSAGE =
+  "Дуга невозможна: нет начала — дуга начинается в конце цепочки или в исходной точке; задайте исходную точку.";
+
 /** The editor's application state. */
 export interface EditorState {
   /** Working Plane the operator draws on. */
@@ -187,12 +191,22 @@ function chainEndOf(state: EditorState): Vec3 | null {
   return state.home;
 }
 
-/** Projects the chain end into the plane's (u, v) millimetres, or null. */
-function chainEndUVOf(state: EditorState): Vec2 | null {
+/** The chain end as the next Segment's start: its 3D point and its plane (u, v) projection. */
+interface ChainStart {
+  readonly start: Vec3;
+  readonly uv: Vec2;
+}
+
+/**
+ * The Arc's start derived from the chain: the 3D chain end with its
+ * plane (u, v) projection. Null with no chain start (no Home Point,
+ * nothing drawn).
+ */
+function chainStartOf(state: EditorState): ChainStart | null {
   const pen = chainEndOf(state);
   if (pen === null) return null;
   const coords = planeCoords(state.plane, pen);
-  return vec2(coords.u, coords.v);
+  return { start: pen, uv: vec2(coords.u, coords.v) };
 }
 
 /** Projects the editor state onto the draft descriptor the canvas draws. */
@@ -200,26 +214,26 @@ export function draftPreviewOf(state: EditorState): DraftPreview | null {
   if (state.tool === "point") {
     // The pending Move: from the chain end (previous Segment's end,
     // the Home Point first) to the cursor.
-    const start = chainEndUVOf(state);
-    if (start === null) return null;
-    return { kind: "move", motionType: state.motionType, start };
+    const chain = chainStartOf(state);
+    if (chain === null) return null;
+    return { kind: "move", motionType: state.motionType, start: chain.uv };
   }
   if (state.tool === "arc") {
     // The pending Arc always previews from the chain end — no click is
     // needed to start it: in radius mode R and direction ride along,
     // in center mode the pending center (null before the first click).
-    const start = chainEndUVOf(state);
-    if (start === null) return null;
+    const chain = chainStartOf(state);
+    if (chain === null) return null;
     return state.arcMode === "radius"
       ? {
           kind: "arcRadius",
-          start,
+          start: chain.uv,
           radiusMm: state.arcRadiusMm,
           direction: state.arcDirection,
         }
       : {
           kind: "arcCenter",
-          start,
+          start: chain.uv,
           center: state.draftCenter,
           direction: state.arcDirection,
         };
@@ -365,25 +379,21 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
  * Point first) — radius mode commits on the single click (the Arc's
  * end, with R from the numeric field), center mode on the second
  * (center, then end). A rejected Arc (impossible for the current
- * radius/center, or a chain start off the Working Plane) keeps the
- * draft so the operator can click a valid next point, and stores a
- * readable message.
+ * radius/center, or a chain start off the Working Plane) stores a
+ * readable message; a pending center-mode center is kept so the
+ * operator can click a valid next point (the radius-mode Arc holds no
+ * draft — the chain start is derived, so the operator just clicks
+ * again).
  */
 function arcClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
-  const start = chainEndOf(state);
-  if (start === null) {
-    return {
-      ...state,
-      error: "Дуга невозможна: нет начала — дуга начинается в конце цепочки или в исходной точке; задайте исходную точку.",
-    };
-  }
-  if (state.arcMode === "center") return arcCenterClick(state, uv, start);
+  const chain = chainStartOf(state);
+  if (chain === null) return { ...state, error: NO_CHAIN_START_MESSAGE };
+  if (state.arcMode === "center") return arcCenterClick(state, uv, chain);
   // Radius mode: one click — the Arc's end; the start is the chain end.
-  const startUV = chainEndUVOf(state);
   try {
     const segment = arcFromRadius({
       plane: state.plane,
-      start,
+      start: chain.start,
       end: target,
       radiusMm: state.arcRadiusMm,
       direction: state.arcDirection,
@@ -392,10 +402,7 @@ function arcClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
     return { ...state, segments: [...state.segments, segment], error: null };
   } catch (e) {
     if (!(e instanceof CoreError)) throw e;
-    return {
-      ...state,
-      error: arcRejectMessage(e, state.arcRadiusMm, startUV === null ? 0 : distance(startUV, uv)),
-    };
+    return { ...state, error: arcRejectMessage(e, state.arcRadiusMm, distance(chain.uv, uv)) };
   }
 }
 
@@ -406,18 +413,14 @@ function arcClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
  * the circle around the center, so the clicked angle is what defines
  * the Arc (the commit then always passes the core's on-circle check).
  */
-function arcCenterClick(state: EditorState, uv: Vec2, start: Vec3): EditorState {
-  const startUV = chainEndUVOf(state);
-  if (startUV === null) {
-    return { ...state, error: "Дуга невозможна: нет начала — дуга начинается в конце цепочки или в исходной точке; задайте исходную точку." };
-  }
+function arcCenterClick(state: EditorState, uv: Vec2, chain: ChainStart): EditorState {
   if (state.draftCenter === null) {
-    if (distance(startUV, uv) <= CENTER_EPS_MM) {
+    if (distance(chain.uv, uv) <= CENTER_EPS_MM) {
       return { ...state, error: "Дуга невозможна: центр совпал с началом — кликните рядом с началом дуги." };
     }
     return { ...state, draftCenter: uv, error: null };
   }
-  const radiusMm = distance(startUV, state.draftCenter);
+  const radiusMm = distance(chain.uv, state.draftCenter);
   const offset = distance(uv, state.draftCenter);
   if (offset <= CENTER_EPS_MM) {
     return { ...state, error: "Дуга невозможна: конец попал в центр — кликните на окружности дуги." };
@@ -430,7 +433,7 @@ function arcCenterClick(state: EditorState, uv: Vec2, start: Vec3): EditorState 
   try {
     const segment = arcFromCenter({
       plane: state.plane,
-      start,
+      start: chain.start,
       end: at(end2),
       center: at(state.draftCenter),
       direction: state.arcDirection,
