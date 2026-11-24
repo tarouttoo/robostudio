@@ -161,7 +161,7 @@ export type DraftPreview =
  * Home Point is unset and nothing is drawn — a chained Move then has no
  * start to preview from.
  */
-export function chainEndOf(state: EditorState): Vec3 | null {
+function chainEndOf(state: EditorState): Vec3 | null {
   const last = state.segments.at(-1);
   if (last !== undefined) return segmentEnds(last).end;
   return state.home;
