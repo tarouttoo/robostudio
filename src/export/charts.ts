@@ -293,9 +293,12 @@ function fmtPx(v: number): string {
  * means zero-width or noise-scale: a span within 10⁻⁹ of the value
  * magnitude is float residue (e.g. a constant 20 mm/s traverse
  * computing to 20 ± 2·10⁻¹⁴), not signal, and pads like an exactly
- * constant series instead of spawning a 10⁻¹⁴-scale tick axis.
+ * constant series instead of spawning a 10⁻¹⁴-scale tick axis. Shared
+ * by every isometric view in the export layer (the charts' axes here,
+ * the Motion Preview's fit in `motion-preview.ts`), so one padding
+ * convention pins them all (ADR 0013).
  */
-function domain(min: number, max: number): readonly [number, number] {
+export function domain(min: number, max: number): readonly [number, number] {
   const magnitude = Math.max(Math.abs(min), Math.abs(max));
   if (!(max - min > 1e-9 * magnitude)) {
     const pad = Math.max(magnitude * 0.05, 1);

@@ -31,7 +31,7 @@ import type { Segment, Trajectory } from "../core/trajectory";
 import type { Vec3 as CoreVec3 } from "../core/vec";
 import type { RobotModel, Vec3 } from "../kinematics/robot-model";
 import type { MotionPlan, MotionRow } from "../motion/planner";
-import { projectIsometric } from "./charts";
+import { domain, projectIsometric } from "./charts";
 import { encodeGif, type GifColor, type GifFrame } from "./gif";
 
 /** Converts a core point (object shape) to the kinematics tuple shape. */
@@ -529,8 +529,10 @@ function fitProjection(points: readonly Vec3[]): (p: Vec3) => [number, number] {
   const projected = points.map(projectIsometric);
   const xs = projected.map(([x]) => x);
   const ys = projected.map(([, y]) => y);
-  const [xLo, xHi] = paddedExtent([Math.min(...xs), Math.max(...xs)]);
-  const [yLo, yHi] = paddedExtent([Math.min(...ys), Math.max(...ys)]);
+  // The charts' axis padding: a degenerate extent pads instead of
+  // collapsing the fit's scale (one convention for every isometric view).
+  const [xLo, xHi] = domain(Math.min(...xs), Math.max(...xs));
+  const [yLo, yHi] = domain(Math.min(...ys), Math.max(...ys));
   const scale = Math.min(
     (MOTION_PREVIEW_WIDTH - 2 * MARGIN_PX) / (xHi - xLo),
     (MOTION_PREVIEW_HEIGHT - 2 * MARGIN_PX) / (yHi - yLo),
@@ -544,12 +546,4 @@ function fitProjection(points: readonly Vec3[]): (p: Vec3) => [number, number] {
       Math.round(MOTION_PREVIEW_HEIGHT / 2 - (up - centerY) * scale),
     ];
   };
-}
-
-/** Pads a degenerate or noise-scale extent the way the charts' `domain()` does. */
-function paddedExtent([lo, hi]: readonly [number, number]): readonly [number, number] {
-  const magnitude = Math.max(Math.abs(lo), Math.abs(hi));
-  if (hi - lo > 1e-9 * magnitude) return [lo, hi];
-  const pad = Math.max(magnitude * 0.05, 1);
-  return [lo - pad, lo + pad];
 }
