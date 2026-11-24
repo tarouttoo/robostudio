@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
 import type { RobotModel } from "../kinematics/robot-model";
-import { createPchipPlanner } from "../motion/planner";
+import { createSplinePlanner } from "../motion/planner";
 import { runPipeline } from "./pipeline";
 import { FIXTURE_TRAJECTORY } from "./golden/fixture";
 
@@ -37,7 +37,7 @@ describe("golden fixtures (ADR 0006)", () => {
   const result = runPipeline({
     trajectory: FIXTURE_TRAJECTORY,
     model,
-    planner: createPchipPlanner(model),
+    planner: createSplinePlanner(model),
   });
 
   it("exports Robot CSV bytes identical to the committed fixture", () => {

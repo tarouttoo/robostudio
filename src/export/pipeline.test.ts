@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { arcFromCenter } from "../core/arc";
 import { line, point, trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
+import { parseProject } from "../project/file";
 import type { JointAngles, RobotModel } from "../kinematics/robot-model";
 import {
-  createPchipPlanner,
+  createSplinePlanner,
   type MotionRow,
   type Planner,
 } from "../motion/planner";
@@ -77,7 +80,7 @@ describe("pipeline: stage chain", () => {
   const model = defaultModel();
 
   it("runs every named stage in order and reports its outcome", () => {
-    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
 
     expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
     expect(result.stages.map((s) => s.stage)).toEqual([
@@ -99,7 +102,7 @@ describe("pipeline: stage chain", () => {
   });
 
   it("keeps collision checking as a reserved no-op stage between planning and export", () => {
-    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
 
     const collision = result.stages[3];
     expect(collision?.stage).toBe("collision");
@@ -109,7 +112,7 @@ describe("pipeline: stage chain", () => {
   });
 
   it("carries the Motion Preview GIF bytes next to the CSVs", () => {
-    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
 
     const gif = result.motionGif;
     expect(gif).toBeInstanceOf(Uint8Array);
@@ -126,15 +129,15 @@ describe("pipeline: stage chain", () => {
   });
 
   it("reports the GIF in the export stage's outcome detail", () => {
-    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
     const exportStage = result.stages[result.stages.length - 1];
     expect(exportStage?.stage).toBe("export");
     expect(exportStage?.detail).toMatch(/robot_motion\.gif/i);
   });
 
   it("renders the GIF deterministically for identical input", () => {
-    const a = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
-    const b = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const a = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
+    const b = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
     expect(a.motionGif).toEqual(b.motionGif);
   });
 });
@@ -149,7 +152,7 @@ describe("pipeline: chained Points", () => {
   ]);
 
   it("runs a chained-Points drawing through every stage and exports the contract CSV", () => {
-    const result = runPipeline({ trajectory: POINT_CHAIN, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: POINT_CHAIN, model, planner: createSplinePlanner(model) });
 
     expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
     // The Robot CSV contract (ADR 0006) is untouched: header, one row
@@ -170,7 +173,7 @@ describe("pipeline: chained Points", () => {
       point({ target: vec3(500, 0, 60), feed: 30, motionType: "PTP" }),
     ]);
     try {
-      runPipeline({ trajectory: outOfReach, model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: outOfReach, model, planner: createSplinePlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PipelineError);
@@ -187,7 +190,7 @@ describe("pipeline: chained Points", () => {
       point({ target: vec3(240, 40, 260), feed: 30, motionType: "LIN" }),
       point({ target: vec3(240, 80, 260), feed: 30, motionType: "PTP" }),
     ]);
-    const result = runPipeline({ trajectory: mixed, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: mixed, model, planner: createSplinePlanner(model) });
 
     expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
     expect(result.plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
@@ -220,7 +223,7 @@ describe("pipeline: chained Points", () => {
       point({ target: ends.target, feed: 30, motionType: "LIN" }),
     ]);
     try {
-      runPipeline({ trajectory: lin, model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: lin, model, planner: createSplinePlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PipelineError);
@@ -232,7 +235,7 @@ describe("pipeline: chained Points", () => {
     const ptp = trajectory(ends.home, [
       point({ target: ends.target, feed: 30, motionType: "PTP" }),
     ]);
-    const result = runPipeline({ trajectory: ptp, model, planner: createPchipPlanner(model) });
+    const result = runPipeline({ trajectory: ptp, model, planner: createSplinePlanner(model) });
     expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
   });
 });
@@ -242,7 +245,7 @@ describe("pipeline: named stage failures stop the chain", () => {
 
   it("fails the discretization stage on an empty Trajectory", () => {
     try {
-      runPipeline({ trajectory: trajectory(vec3(240, 0, 260), []), model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: trajectory(vec3(240, 0, 260), []), model, planner: createSplinePlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PipelineError);
@@ -257,10 +260,10 @@ describe("pipeline: named stage failures stop the chain", () => {
       line({ start: vec3(240, 0, 260), end: vec3(240, 0, 260), feed: 20 }),
     ]);
     expect(() =>
-      runPipeline({ trajectory: degenerate, model, planner: createPchipPlanner(model) }),
+      runPipeline({ trajectory: degenerate, model, planner: createSplinePlanner(model) }),
     ).toThrow(PipelineError);
     try {
-      runPipeline({ trajectory: degenerate, model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: degenerate, model, planner: createSplinePlanner(model) });
     } catch (error) {
       expect((error as PipelineError).stage).toBe("discretization");
       expect((error as PipelineError).message).toMatch(/draws nothing/i);
@@ -277,7 +280,7 @@ describe("pipeline: named stage failures stop the chain", () => {
       line({ start: vec3(500, 0, 60), end: vec3(550, 0, 60), feed: 20 }),
     ]);
     try {
-      runPipeline({ trajectory: far, model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: far, model, planner: createSplinePlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       const pipelineError = error as PipelineError;
@@ -295,7 +298,7 @@ describe("pipeline: named stage failures stop the chain", () => {
       line({ start: vec3(40, 0, 170), end: vec3(40, 10, 170), feed: 20 }),
     ]);
     try {
-      runPipeline({ trajectory: folded, model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: folded, model, planner: createSplinePlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       const pipelineError = error as PipelineError;
@@ -313,7 +316,7 @@ describe("pipeline: named stage failures stop the chain", () => {
       runPipeline({
         trajectory: LINE_AND_ARC,
         model: stiffModel,
-        planner: createPchipPlanner(stiffModel),
+        planner: createSplinePlanner(stiffModel),
       });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
@@ -364,6 +367,49 @@ describe("pipeline: named stage failures stop the chain", () => {
     expect(() => runPipeline({ trajectory: LINE_AND_ARC, model, planner: throwingPlanner })).toThrow(
       RangeError,
     );
+  });
+});
+
+describe("pipeline: cyclic joint unwrap (ADR 0021)", () => {
+  const model = defaultModel();
+  const planner = createSplinePlanner(model);
+
+  /** The operator's 4-corner square whose last Move crosses atan2's ±π branch cut. */
+  function squareFourCorners() {
+    const project = parseProject(
+      readFileSync(join(import.meta.dirname, "../project/fixtures/square-4-corners.json"), "utf8"),
+    );
+    if (!project.home) throw new Error("fixture has no Home Point");
+    return trajectory(project.home, project.segments);
+  }
+
+  it("plans the branch-cut crossing Segment in Feed-nominal time, not as a fake base revolution", () => {
+    const result = runPipeline({ trajectory: squareFourCorners(), model, planner });
+
+    // Without the unwrap this Segment stretched to ~12 774.6 s chasing a
+    // fake 360° revolution across the ±π representation cut (641 628
+    // rows); with it, the base keeps rotating through the "back" and the
+    // Segment plans in Feed-nominal time (~21.7 s).
+    const crossing = result.plan.ranges.find((range) => range.segmentIndex === 3);
+    expect(crossing).toBeDefined();
+    const durationS = ((crossing as (typeof result.plan.ranges)[number]).endMs -
+      (crossing as (typeof result.plan.ranges)[number]).startMs) / 1000;
+    expect(durationS).toBeGreaterThan(15);
+    expect(durationS).toBeLessThan(30);
+    expect(result.plan.durationMs).toBeLessThan(2 * 60 * 1000);
+  });
+
+  it("keeps q1 continuous across rows through the branch cut", () => {
+    const result = runPipeline({ trajectory: squareFourCorners(), model, planner });
+    for (let i = 1; i < result.plan.rows.length; i++) {
+      const prev = result.plan.rows[i - 1] as (typeof result.plan.rows)[number];
+      const row = result.plan.rows[i] as (typeof result.plan.rows)[number];
+      if (prev.segmentIndex !== 3 || row.segmentIndex !== 3) continue;
+      const delta = Math.abs((row.q[0] as number) - (prev.q[0] as number));
+      // The fake revolution moved q1 by up to ~6.28 rad inside one 0.5 mm
+      // knot; real base motion between 20 ms rows stays orders below.
+      expect(delta).toBeLessThan(0.02);
+    }
   });
 });
 

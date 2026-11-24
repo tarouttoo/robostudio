@@ -6,7 +6,7 @@ import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
 import type { JointConfig, RobotModel } from "../kinematics/robot-model";
-import { CONTROL_STEP_MS, createPchipPlanner, type PlanSegmentRange } from "../motion/planner";
+import { CONTROL_STEP_MS, createSplinePlanner, type PlanSegmentRange } from "../motion/planner";
 import { runPipeline, type PipelineResult } from "./pipeline";
 
 /*
@@ -33,7 +33,7 @@ const MOTION_SLACK = 1.05;
 /**
  * Peak reconstructed pen speed as a multiple of the Segment Feed: the
  * quintic S-curve peaks at 1.875× the mean speed, and a joint-space
- * transit's PCHIP path can bulge a further ~6 % in cartesian space
+ * transit's spline path can bulge a further ~6 % in cartesian space
  * (observed on the golden transit), so 2.5× bounds smooth motion while
  * a real discontinuity (a dropped row, a teleporting pen) overshoots
  * it by far.
@@ -101,7 +101,7 @@ describe("golden geometry: 100×100 square with inscribed r = 50 circle (ADR 000
   const result: PipelineResult = runPipeline({
     trajectory: GOLDEN_SHAPE,
     model,
-    planner: createPchipPlanner(model),
+    planner: createSplinePlanner(model),
   });
   const rows = parseRobotCsv(result.robotCsv);
   /** The reconstructed pen position of each row, via forward kinematics. */

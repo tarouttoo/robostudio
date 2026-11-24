@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "view": {
+    "plane": "XY",
+    "fixedMm": 140,
+    "feedMmMin": 1200
+  },
+  "home": {
+    "x": 213,
+    "y": 0,
+    "z": 305
+  },
+  "segments": [
+    {
+      "kind": "point",
+      "target": { "x": 213, "y": 213, "z": 140 },
+      "feed": 20,
+      "motionType": "LIN"
+    },
+    {
+      "kind": "point",
+      "target": { "x": 213, "y": -213, "z": 140 },
+      "feed": 20,
+      "motionType": "LIN"
+    },
+    {
+      "kind": "point",
+      "target": { "x": -213, "y": -213, "z": 140 },
+      "feed": 20,
+      "motionType": "LIN"
+    },
+    {
+      "kind": "point",
+      "target": { "x": -213, "y": 213, "z": 140 },
+      "feed": 20,
+      "motionType": "LIN"
+    }
+  ]
+}

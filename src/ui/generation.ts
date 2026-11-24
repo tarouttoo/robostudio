@@ -7,7 +7,7 @@
  * the pipeline's own (English) texts.
  *
  * The Robot Model is bound once, at session creation (ADR 0008): the
- * PCHIP Planner is created inside the session from that model, so the
+ * spline Planner is created inside the session from that model, so the
  * app shell holds one stable reference and a second robot is one
  * configuration change at the factory, not edits at every call site.
  * A successful run renders the Charts right there, through the same
@@ -40,7 +40,7 @@ import {
   type PipelineStage,
   type RenderedChart,
 } from "../export";
-import { createPchipPlanner } from "../motion";
+import { createSplinePlanner } from "../motion";
 import type { RobotModel } from "../kinematics/robot-model";
 import type { EditorState } from "./editor";
 
@@ -106,7 +106,7 @@ export interface GenerationSession {
  * site, and repeated runs share the binding.
  */
 export function createGenerationSession(model: RobotModel): GenerationSession {
-  const planner = createPchipPlanner(model);
+  const planner = createSplinePlanner(model);
   return {
     run: (state: EditorState): GenerationOutcome => {
       if (state.home === null) {
