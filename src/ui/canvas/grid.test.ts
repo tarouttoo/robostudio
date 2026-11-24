@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { makeCanvasTransform, worldBounds } from "./transform";
-import { GRID_MAJOR_MM, GRID_MINOR_MM, gridLinesMm } from "./grid";
+import { GRID_MAJOR_MM, GRID_MINOR_MM, gridLinesMm, gridStepsMm } from "./grid";
 
 describe("millimetre grid", () => {
   it("puts minor lines every 1 mm and major lines every 10 mm", () => {
@@ -57,5 +57,26 @@ describe("millimetre grid", () => {
         expect(minorU[i]! - minorU[i - 1]!).toBe(1);
       }
     }
+  });
+});
+
+describe("gridStepsMm (issue #44)", () => {
+  it("keeps the 1 mm/10 mm steps at the classic drawing scales", () => {
+    // At 4 px/mm a minor line sits 4 px from its neighbour: readable.
+    expect(gridStepsMm(4)).toEqual({ minorMm: 1, majorMm: 10 });
+    expect(gridStepsMm(20)).toEqual({ minorMm: 1, majorMm: 10 });
+  });
+
+  it("steps the grid up as the view zooms out, keeping lines apart on screen", () => {
+    // The fitted zone view runs near 1 px/mm, where 1 mm lines merge
+    // into a solid fill; the 1-2-5 ladder keeps ≥ 2 px between lines.
+    expect(gridStepsMm(1.018)).toEqual({ minorMm: 2, majorMm: 20 });
+    expect(gridStepsMm(0.9)).toEqual({ minorMm: 5, majorMm: 50 });
+    expect(gridStepsMm(0.5)).toEqual({ minorMm: 5, majorMm: 50 });
+  });
+
+  it("lands exactly on the 2 px spacing boundary", () => {
+    // 2 mm at 1 px/mm is exactly 2 px: still a grid, not a fill.
+    expect(gridStepsMm(1)).toEqual({ minorMm: 2, majorMm: 20 });
   });
 });

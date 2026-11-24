@@ -441,7 +441,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
             )}
           </section>
           <p style={{ margin: 0, color: "#888", fontSize: "0.85rem" }}>
-            Правая кнопка мыши отменяет незавершённый элемент.
+            Колесо мыши масштабирует вид (якорь — курсор), средняя кнопка перемещает, «Вписать зону» показывает всю зону достижимости, правая кнопка мыши отменяет незавершённый элемент.
           </p>
 
           <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
