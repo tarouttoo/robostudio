@@ -10,9 +10,9 @@
  * plotted or projected here.
  *
  * Playback spans the Motion Plan's real duration (user story 28):
- * wall-clock time selects the frame whose sampled moment has arrived —
- * the GIF's pacing discipline — so preview timing matches what the
- * robot will do. The operator pauses/resumes («Пуск»/«Пауза») and
+ * wall-clock time selects the frame whose sampled moment has arrived
+ * (the pacing of {@link frameIndexAt}), so preview timing matches what
+ * the robot will do. The operator pauses/resumes («Пуск»/«Пауза») and
  * scrubs across the duration with the time slider; the readout shows
  * the current moment and the plan duration in seconds.
  */
@@ -26,6 +26,7 @@ import {
   rasterizePreviewFrame,
   type MotionPreviewFrame,
 } from "../export";
+import { frameIndexAt } from "./preview-playback";
 
 /** Props of the playback dialog: the Generation's frames and their real duration. */
 export interface MotionPreviewDialogProps {
@@ -35,20 +36,6 @@ export interface MotionPreviewDialogProps {
   readonly durationMs: number;
   /** Called when the operator closes the dialog. */
   readonly onClose: () => void;
-}
-
-/**
- * The frame shown at `tMs`: the last sampled frame whose moment has
- * arrived (frame 0 before and at the first sample) — the same
- * discrete pacing the GIF plays with.
- */
-function frameIndexAt(frames: readonly MotionPreviewFrame[], tMs: number): number {
-  let index = 0;
-  for (let i = 0; i < frames.length; i++) {
-    if ((frames[i]?.tMs ?? 0) > tMs) break;
-    index = i;
-  }
-  return index;
 }
 
 /** Formats milliseconds as seconds for the readout: two decimals, plain decimal. */
