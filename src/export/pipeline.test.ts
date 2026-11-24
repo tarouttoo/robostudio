@@ -13,6 +13,8 @@ import {
 } from "../motion/planner";
 import { MotionError } from "../motion/errors";
 import { PipelineError } from "./errors";
+import { MOTION_PREVIEW_MAX_FRAMES } from "./motion-preview";
+import { decodeGifFrames } from "./gif-test-support";
 import { PIPELINE_STAGES, runPipeline } from "./pipeline";
 
 /** The default MiKo-mini model from validated configuration. */
@@ -104,6 +106,36 @@ describe("pipeline: stage chain", () => {
     expect(collision?.detail).toMatch(/reserved/i);
     // The no-op never stops the pipeline: export still ran.
     expect(result.robotCsv.length).toBeGreaterThan(0);
+  });
+
+  it("carries the Motion Preview GIF bytes next to the CSVs", () => {
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+
+    const gif = result.motionGif;
+    expect(gif).toBeInstanceOf(Uint8Array);
+    expect(gif.length).toBeGreaterThan(0);
+    expect(String.fromCharCode(gif[0] as number, gif[1] as number, gif[2] as number)).toBe("GIF");
+    // The animation samples the plan's rows: exactly one frame per row
+    // for a plan inside the ~300-frame budget, paced over the duration.
+    const decoded = decodeGifFrames(gif);
+    expect(decoded.frames.length).toBe(Math.min(result.plan.rows.length, MOTION_PREVIEW_MAX_FRAMES));
+    expect(decoded.frames.length).toBeLessThanOrEqual(300);
+    const totalDelayS = decoded.delays.reduce((sum, d) => sum + d, 0);
+    expect(totalDelayS * 1000).toBeGreaterThanOrEqual(result.plan.durationMs - 350);
+    expect(totalDelayS * 1000).toBeLessThanOrEqual(result.plan.durationMs + 350);
+  });
+
+  it("reports the GIF in the export stage's outcome detail", () => {
+    const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const exportStage = result.stages[result.stages.length - 1];
+    expect(exportStage?.stage).toBe("export");
+    expect(exportStage?.detail).toMatch(/robot_motion\.gif/i);
+  });
+
+  it("renders the GIF deterministically for identical input", () => {
+    const a = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    const b = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) });
+    expect(a.motionGif).toEqual(b.motionGif);
   });
 });
 
