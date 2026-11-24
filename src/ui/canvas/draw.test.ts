@@ -389,8 +389,9 @@ describe("arc preview points", () => {
 });
 
 describe("drawScene with arc drafts", () => {
-  // A pointermove always precedes a pointerdown, so right after the
-  // first Arc click the cursor is exactly on the fresh draft start —
+  // A pointermove always precedes a pointerdown, and the chained Arc
+  // previews from its start (the chain end) before any click — so the
+  // cursor resting exactly on the draft start must not break the paint:
   // the scene painted then must not depend on a center being resolvable.
   const sceneWith = (cursor: Vec2): Omit<CanvasScene, "transform"> => ({
     plane: "XY",

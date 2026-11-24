@@ -93,8 +93,13 @@ describe("app shell", () => {
     expect(html).toContain("Дуга");
     expect(html).toContain("Точка");
     // Arc definition modes per ADR 0005: radius R or explicit center.
+    // Chained per issue #43: the radius mode takes one click (the Arc's
+    // end, R from the field), the center mode two (center, then end).
     expect(html).toContain("Радиус R");
     expect(html).toContain("Центр");
+    expect(html).toContain("1 клик — конец дуги");
+    expect(html).toContain("2 клика: центр, потом конец");
+    expect(html).toContain("1–2 клика, продолжается с конца цепочки");
     // Direction per GLOSSARY.md: CW (по часовой), CCW (против часовой).
     expect(html).toMatch(/name="arcDirection"[^>]*value="CW"/);
     expect(html).toMatch(/name="arcDirection"[^>]*value="CCW"/);

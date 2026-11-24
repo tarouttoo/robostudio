@@ -335,9 +335,9 @@ function drawDraft(
   if (draft.kind === "arcRadius") {
     // Guide chord, then the preview Arc when the radius resolves a center.
     dashedPolyline(ctx, transform, [draft.start, cursor]);
-    // A cursor on the draft start (the state right after the first
-    // click) resolves no center; the commit path rejects that click
-    // with a readable message, so the view simply skips the preview.
+    // A cursor exactly on the chain start (the Arc's start) resolves no
+    // center; the commit path rejects that click with a readable
+    // message, so the view simply skips the preview.
     let center: Vec2 | null;
     try {
       center = resolveCenterFromRadius(draft.start, cursor, draft.radiusMm, draft.direction);
