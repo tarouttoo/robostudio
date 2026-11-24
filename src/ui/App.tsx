@@ -67,8 +67,9 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * canvas is a pure view over that state (ADR 0005, ADR 0007). On
  * «Сгенерировать» the drawn Trajectory runs through the
  * headless pipeline (the Generation session's `run`) and the validation stage log is
- * shown; a successful generation unlocks «Экспорт CSV», which writes
- * the Robot CSV and RViz CSV into an operator-picked folder through the
+ * shown; a successful generation unlocks «Экспорт…», which writes the
+ * Robot CSV, the RViz CSV, and the Motion Preview GIF
+ * (`robot_motion.gif`) into an operator-picked folder through the
  * main process, and switches the main area to «Графики» — every chart
  * the outcome carries, rendered at Generation time by the headless
  * renderer (ADR 0013, `ChartsView.tsx`). Regeneration replaces those
@@ -102,8 +103,9 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
     setView(viewAfterGeneration(outcome));
   };
 
-  /** Writes the generated Robot CSV and RViz CSV into a picked folder; the
-   * eligibility predicate is the gate — only an eligible generation exports. */
+  /** Writes the generated files (both CSVs and the Motion Preview GIF) into a
+   * picked folder; the eligibility predicate is the gate — only an eligible
+   * generation exports. */
   const handleExport = async (): Promise<void> => {
     if (eligibility.kind !== "eligible") return;
     const api = bridge();
@@ -111,7 +113,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
       setExportMessage({ text: "Экспорт недоступен: нет моста к основному процессу.", isError: true });
       return;
     }
-    const result = await api.exportCsvs(eligibility.robotCsv, eligibility.rvizCsv);
+    const result = await api.exportCsvs(eligibility.robotCsv, eligibility.rvizCsv, eligibility.motionGif);
     if (result.kind === "exported") setExportMessage({ text: `Экспортировано: ${result.files.join(", ")}`, isError: false });
     else if (result.kind === "canceled") setExportMessage(null);
     else setExportMessage({ text: `Экспорт не выполнен: ${result.error.message}`, isError: true });
@@ -392,7 +394,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 onClick={() => void handleExport()}
                 disabled={eligibility.kind !== "eligible"}
               >
-                Экспорт CSV…
+                Экспорт…
               </button>
             </div>
             {generation !== null && (

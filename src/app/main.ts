@@ -64,8 +64,8 @@ function registerIpc(): void {
       return owner === undefined ? dialog.showOpenDialog(options) : dialog.showOpenDialog(owner, options);
     },
   };
-  ipcMain.handle("export:csvs", (_event, robotCsv: string, rvizCsv: string) =>
-    exportCsvs(exportDialogs, robotCsv, rvizCsv),
+  ipcMain.handle("export:csvs", (_event, robotCsv: string, rvizCsv: string, motionGif: Uint8Array) =>
+    exportCsvs(exportDialogs, robotCsv, rvizCsv, motionGif),
   );
 }
 

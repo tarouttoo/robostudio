@@ -30,7 +30,7 @@ import { discretizeTrajectory, type DiscretizedPath } from "../core/discretize";
 import type { Segment, Trajectory } from "../core/trajectory";
 import type { Vec3 as CoreVec3 } from "../core/vec";
 import type { RobotModel, Vec3 } from "../kinematics/robot-model";
-import { CONTROL_STEP_MS, type MotionPlan, type MotionRow } from "../motion/planner";
+import type { MotionPlan, MotionRow } from "../motion/planner";
 import { projectIsometric } from "./charts";
 import { encodeGif, type GifColor, type GifFrame } from "./gif";
 

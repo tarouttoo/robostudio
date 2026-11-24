@@ -15,6 +15,6 @@ contextBridge.exposeInMainWorld("robostudio", {
   appVersion: APP_VERSION,
   saveProject: (json: string) => ipcRenderer.invoke("project:save", json),
   openProject: () => ipcRenderer.invoke("project:open"),
-  exportCsvs: (robotCsv: string, rvizCsv: string) =>
-    ipcRenderer.invoke("export:csvs", robotCsv, rvizCsv),
+  exportCsvs: (robotCsv: string, rvizCsv: string, motionGif: Uint8Array) =>
+    ipcRenderer.invoke("export:csvs", robotCsv, rvizCsv, motionGif),
 });
