@@ -51,10 +51,10 @@ never imports `app` — the sandboxed renderer reaches the main process
 only through the preload bridge (ADR 0003).
 
 The agent pipeline code lives under
-`.sandcastle/` and `.github/workflows/` and is kept verbatim from the
-template it came from (see [Agent pipeline](#agent-pipeline)); the
-product workflows `ci.yml` and `release.yml` are the only additions
-there.
+`.sandcastle/` and `.github/workflows/`; it grew out of
+[`agent-pipeline-template`](https://github.com/tarouttoo/agent-pipeline-template)
+and evolves by this repo's own decisions (see [History](#history) and
+`docs/adr/`).
 
 ## Builds and releases
 
@@ -75,9 +75,11 @@ This repo ships the label-driven agent pipeline from
 [`agent-pipeline-template`](https://github.com/tarouttoo/agent-pipeline-template)
 — a port of [mattpocock/sandcastle](https://github.com/mattpocock/sandcastle)
 (commit `a53e227250fb51df0ad54155b85fecc1c090c937`) running the pi CLI as
-the coding agent, not Claude Code. The pipeline files (`.github/workflows/`,
-`.sandcastle/agent-workflows/`) are a verbatim copy of that template; its
-README remains the reference for upstream deviations and pipeline internals.
+the coding agent, not Claude Code. The pipeline started as a verbatim copy
+of that template (see the commit hash in [Attribution](#attribution)) and
+has been evolving here ever since — by ADRs and course adoption, not by
+tracking upstream
+([ADR 0019](docs/adr/0019-adopt-software-factory-part-two.md)).
 
 | Label | Workflow | What happens |
 |---|---|---|
@@ -153,27 +155,30 @@ RViz CSV formats (pinned by golden tests, `docs/adr/0006-csv-contracts-pinned-by
 the versioned project-file schema, and release publishing. The review pass
 reads this section when auditing the Merge Danger call in the PR body.
 
-## Deviations
+## History
 
-This repo tracks `agent-pipeline-template` (itself a sandcastle port);
-where it deliberately diverges:
+The pipeline grew out of `agent-pipeline-template` (itself a sandcastle
+port); these are the milestones where it became this repo's own machine.
+What follows is history and attribution, not a divergence ledger — since
+[ADR 0019](docs/adr/0019-adopt-software-factory-part-two.md) the pipeline
+files are maintained here directly, with substantial changes documented as
+ADRs:
 
 1. **Agent model** — every workflow runs `zai` / `glm-5.3-flash:max` via the
    env vars; the `:max` suffix is pi's thinking level, passed verbatim
    through the sandcastle print command.
 2. **The `ready-for-agent` converter** — kept from the template even though
    upstream sandcastle lacks it; it is what lets the skills' to-spec /
-   to-tickets flow feed the pipeline without manual relabelling
-   ([ADR 0010](docs/adr/0010-ready-for-agent-converter.md)).
-3. **Course alignment (Software Factory Part One)** — features adopted from
-   the course's section 06 that current upstream lacks: evidence
-   screenshots (`/tmp/evidence/` + `upload-artifact` + xvfb via
+   to-tickets flow feed the pipeline without manual relabelling, and in
+   Part Two (ADR 0019) it becomes the frontier computer.
+   ([ADR 0010](docs/adr/0010-ready-for-agent-converter.md))
+3. **Software Factory Part One adoption** — evidence screenshots
+   (`/tmp/evidence/` + `upload-artifact` + xvfb via
    `scripts/evidence-screenshot.mjs`), the review summary's "Rules this
    review wanted and could not find" capture, the manual `/retro` loop
    ([docs/agents/retro.md](docs/agents/retro.md)), and the skill-driven,
    fix-every-finding review prompt (the `code-review` skill is vendored
-   under `.agents/skills/`; upstream's workflow prompt is the conservative
-   inline one)
+   under `.agents/skills/`)
    ([ADR 0014](docs/adr/0014-align-factory-with-software-factory-part-one.md)).
 4. **Auto-merge gate requires a two-way door** — a clean review and green
    CI additionally require the PR body's Merge Danger to declare
@@ -183,6 +188,10 @@ where it deliberately diverges:
    tightening [ADR 0011](docs/adr/0011-auto-merge-after-clean-review.md)).
 5. **`AGENT_PAT`** plays the role the course calls `FACTORY_PAT`: a
    fine-grained PAT whose label applications fire the chained workflows.
+6. **Software Factory Part Two adoption** — the factory stays all-GitHub;
+   Auto-Rebase janitor, the improve-architecture button, and the staged
+   Implement Spec v2 orchestration
+   ([ADR 0019](docs/adr/0019-adopt-software-factory-part-two.md)).
 
 ## Attribution
 

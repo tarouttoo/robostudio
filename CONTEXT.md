@@ -40,8 +40,8 @@ Actions, ported from mattpocock/sandcastle) that implements
   pipeline operations.
 - `docs/adr/0015-prototype-measured-miko-mini-geometry.md` — the measured
   MiKo-mini constants (links, tool offset, limits, default Home Point).
-- `.sandcastle/CODING_STANDARDS.md` — the code style the workflow agents
-  apply; referenced verbatim by prompts.
+- `.sandcastle/CODING_STANDARDS.md` — the judgment rules the review pass
+  applies; grown via Retro harvests (ADR 0019).
 
 ## Pipeline vocabulary
 

@@ -48,8 +48,8 @@ describe("ready-for-agent converter docs", () => {
     );
   });
 
-  it("is recorded as a documented deviation with an ADR", () => {
-    expect(readme).toMatch(/Deviations[\s\S]*ready-for-agent`? converter/i);
+  it("is recorded in the README history with an ADR", () => {
+    expect(readme).toMatch(/History[\s\S]*ready-for-agent`? converter/i);
     expect(
       existsSync(
         new URL(

@@ -14,19 +14,20 @@ humans and coding agents edit both the product code and the pipeline code.
   and forbids synonyms.
 - **Changing pipeline behaviour** — check `docs/adr/` for prior decisions;
   add an ADR when making a non-obvious, hard-to-reverse choice.
-- **Code style in adopting repos** — `.sandcastle/CODING_STANDARDS.md` is
-  what the workflow agents apply; do not edit it lightly, prompts reference
-  it verbatim.
+- **Code style** — `.sandcastle/CODING_STANDARDS.md` holds the judgment
+  rules the review pass applies; grow it only through Retro harvests
+  (ADR 0019), never by casual edits.
 - **Skill conventions** (triage labels, issue-tracker commands, domain-doc
   layout) — read `docs/agents/`; the triage-repro skill also lives under
   `.agents/skills/triage-repro/`.
-- **Adopter setup and upstream deviations** — `README.md`.
+- **Pipeline history and how it diverged from its origins** — `README.md`.
 
 ## Constraints
 
-- Files under `.sandcastle/agent-workflows/` and `.github/workflows/` are a
-  verbatim port of upstream (modulo the documented deviations in
-  `README.md`). Verify against upstream before restructuring.
+- Pipeline files (`.sandcastle/agent-workflows/`, `.github/workflows/`)
+  are ours to change: the verbatim-port constraint was removed by ADR 0019,
+  and the course / upstream sandcastle are references, not authorities.
+  Document substantial behavior changes in `docs/adr/`.
 - Before finishing: `npm run typecheck` and `npm test` must pass.
 
 ## Agent skills

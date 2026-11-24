@@ -107,6 +107,40 @@ here.
 Factory vocabulary (English only; used in workflows, docs and issues —
 see `docs/agents/`):
 
+- **Spec (Спека)** — an issue describing a coherent feature or change,
+  decomposed into child Tickets with blocking edges.
+- **Ticket (Тикет)** — a child issue of a Spec, small enough for one
+  implement Run; carries blocking edges to other Tickets.
+- **Task (Задача)** — a unit of factory work performed as a Run: explore,
+  implement, review, rebase, prototype. Designing new Tasks is how the
+  factory grows.
+- **Run (Прогон)** — one execution of a Task on a Runner.
+- **Runner (Раннер)** — the disposable machine a Run executes on; any state
+  it creates ends up in the Git Host (commits, branches, PRs) or the
+  Ticket Tracker (comments, labels).
+- **Orchestrator (Оркестратор)** — keeps track of Runners, triggers them on
+  events and schedules, and handles Run errors.
+- **Ticket Tracker (Трекер задач)** — where Tasks are requested and
+  tracked; the channel for agent–human communication: labels, comments,
+  verdicts.
+- **Git Host (Git-хост)** — where branches, pull requests and reviews live.
+- **Observability Platform (Платформа наблюдаемости)** — shows the whole
+  factory at once: costs and success rates of Runs.
+- **Auto-Rebase (Авторебейз)** — the Task that keeps open agent PRs
+  mergeable with their base; fires when a PR merges (plus a backup
+  schedule) and starts only in an Agent-quiet state.
+- **Agent-quiet (Без активных агентов)** — the state when no agent Runs are
+  in progress; a precondition for Auto-Rebase.
+- **Improvement (Улучшение)** — a recommendation Ticket the factory
+  generates about the codebase itself, only on explicit human request; a
+  human reviews Improvements before they enter the pipeline.
+- **Frontier (Фронтир)** — the Tickets of a Spec whose blocking edges are
+  all resolved; the next wave of implement Runs.
+- **Integration Branch (Интеграционная ветка)** — the branch of one Spec
+  where completed Ticket branches are merged; the Spec reaches the Git
+  Host's main line as a single merge from it.
+- **Merger (Мерджер)** — the Run that merges completed Ticket branches into
+  the Integration Branch and closes their Tickets.
 - **Retro (Ретро)** — a human-invoked retrospective over factory runs
   (Actions run URLs in, factory-improvement PR out); harvests the review's
   "Rules this review wanted and could not find" into checks or standards.
