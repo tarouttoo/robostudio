@@ -55,6 +55,13 @@ function scriptedModel(): RobotModel {
     // Unused by these tests; the interface requires a finite bound.
     workspaceRadiusMm: 1000,
     forwardKinematics: (angles: JointAngles) => [angles[0] as number, angles[1] as number, angles[2] as number],
+    chainPoints: (angles: JointAngles) => [
+      [0, 0, 0],
+      [0, 0, 0],
+      [angles[0] as number, 0, 0],
+      [angles[1] as number, 0, 0],
+      [angles[2] as number, 0, 0],
+    ],
     inverseKinematics: (target) =>
       (target[0] ?? 0) > SCRIPTED_REACH_X_MM
         ? { status: "unreachable" }
@@ -280,7 +287,7 @@ describe("generation: log lines", () => {
 });
 
 describe("generation: export eligibility", () => {
-  it("a fresh successful generation is eligible, carrying exactly the CSVs it generated", () => {
+  it("a fresh successful generation is eligible, carrying exactly the CSVs and the GIF it generated", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
     const outcome = okOutcome(session, state);
@@ -288,6 +295,7 @@ describe("generation: export eligibility", () => {
     if (eligibility.kind !== "eligible") throw new Error(`expected eligible, got ${eligibility.kind}`);
     expect(eligibility.robotCsv).toBe(outcome.result.robotCsv);
     expect(eligibility.rvizCsv).toBe(outcome.result.rvizCsv);
+    expect(eligibility.motionGif).toBe(outcome.result.motionGif);
   });
 
   it("editing the drawing after a successful generation goes stale, with the module's Russian regeneration notice", () => {
@@ -303,7 +311,7 @@ describe("generation: export eligibility", () => {
     expect(exportEligibility(outcome, homeMoved).kind).toBe("stale");
   });
 
-  it("regenerating after an edit is eligible again, with the new run's CSVs", () => {
+  it("regenerating after an edit is eligible again, with the new run's CSVs and GIF", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
     const outcome = okOutcome(session, state);
@@ -314,6 +322,7 @@ describe("generation: export eligibility", () => {
     if (eligibility.kind !== "eligible") throw new Error(`expected eligible, got ${eligibility.kind}`);
     expect(eligibility.robotCsv).toBe(regenerated.result.robotCsv);
     expect(eligibility.rvizCsv).toBe(regenerated.result.rvizCsv);
+    expect(eligibility.motionGif).toBe(regenerated.result.motionGif);
   });
 
   it("without a successful generation export stays locked: no run yet, a failed or a blocked attempt", () => {

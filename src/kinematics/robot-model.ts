@@ -98,6 +98,18 @@ export interface RobotModel {
   forwardKinematics(angles: JointAngles): Vec3;
 
   /**
+   * World positions of the chain's skeleton for the given joint angles:
+   * the fixed base point (the model-frame origin) first, then one point
+   * per joint pivot in actuation order, ending with the end-effector
+   * position — the same point `forwardKinematics(angles)` returns.
+   * Consecutive points are the links a Motion Preview draws (the
+   * GIF exporter, `src/export`); the array therefore holds
+   * `joints.length + 2` points.
+   * @throws when `angles.length` differs from {@link joints.length}.
+   */
+  chainPoints(angles: JointAngles): readonly Vec3[];
+
+  /**
    * Inverse kinematics: an end-effector position in millimetres → joint
    * angles in radians, or a named failure status.
    */

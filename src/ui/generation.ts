@@ -201,12 +201,14 @@ export function viewAfterGeneration(outcome: GenerationOutcome): MainView {
  */
 export type ExportEligibility =
   | {
-      /** The export may run: both CSVs of the last successful generation. */
+      /** The export may run: the generated files of the last successful generation. */
       readonly kind: "eligible";
       /** The Robot CSV to write. */
       readonly robotCsv: string;
       /** The RViz CSV to write. */
       readonly rvizCsv: string;
+      /** The Motion Preview GIF bytes to write (as `robot_motion.gif`). */
+      readonly motionGif: Uint8Array;
     }
   | {
       /** The drawing changed after the last successful generation. */
@@ -224,11 +226,12 @@ export type ExportEligibility =
  * outcome — the one predicate the export button's disabled state and its
  * notices render from, so the eligibility rule is spelled once, here,
  * not twice in the shell's JSX. A fresh successful generation is
- * `eligible` and carries the two CSVs to write; a drawing edited after
- * its generation is `stale` — the exported CSVs must never describe an
- * older drawing — with the module's Russian notice; without a successful
- * generation (none yet, or the last attempt failed or was blocked) the
- * export stays `no-success`.
+ * `eligible` and carries the files to write (both CSVs and the Motion
+ * Preview GIF); a drawing edited after its generation is `stale` — the
+ * exported files must never describe an older drawing — with the
+ * module's Russian notice; without a successful generation (none yet,
+ * or the last attempt failed or was blocked) the export stays
+ * `no-success`.
  *
  * Staleness compares the generated Trajectory's parts against the live
  * editor state by reference — the immutable reducer replaces `home` and
@@ -246,5 +249,10 @@ export function exportEligibility(
       notice: "Чертёж изменился после генерации — сгенерируйте заново перед экспортом.",
     };
   }
-  return { kind: "eligible", robotCsv: outcome.result.robotCsv, rvizCsv: outcome.result.rvizCsv };
+  return {
+    kind: "eligible",
+    robotCsv: outcome.result.robotCsv,
+    rvizCsv: outcome.result.rvizCsv,
+    motionGif: outcome.result.motionGif,
+  };
 }

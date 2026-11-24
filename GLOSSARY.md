@@ -85,6 +85,14 @@ here.
   headless as SVG in the export layer (ADR `0013`); path charts are
   equal-aspect (ADR `0007`); the app shows every chart of the last
   generation in the «Графики» view.
+- **Motion Preview (Предпросмотр движения)** — the animated GIF the
+  pipeline renders from the last successful Generation's Motion Plan:
+  isometric frames (the charts' projection, ADR 0013) showing the
+  robot's base and links moving along the Trajectory, the travelled
+  part highlighted, the Home Point, and under PTP the actual TCP trace
+  from per-frame forward kinematics. At most 300 frames, paced over
+  the plan's real duration; written as `robot_motion.gif` next to the
+  CSVs (ADR 0018).
 - **Robot CSV** — the Exporter output the real robot consumes:
   `t,q1,q2,q3`, milliseconds and radians, 20 ms row step. Format is a
   contract pinned by tests (ADR `0006`).

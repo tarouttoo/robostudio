@@ -21,9 +21,11 @@
  *    in the chain so collision checking can be added later without
  *    reshaping the pipeline.
  * 5. `export` — the Robot CSV and RViz CSV exporters render the plan,
- *    and the exported arrays are parsed back and checked against the
- *    plan (row count, header, time column, values within formatting
- *    precision) before the bytes leave the pipeline.
+ *    the Motion Preview GIF is rendered from the same plan (the
+ *    animated isometric preview, `robot_motion.gif`), and the exported
+ *    arrays are parsed back and checked against the plan (row count,
+ *    header, time column, values within formatting precision) before
+ *    the bytes leave the pipeline.
  *
  * The stages are also reported as outcomes on success so the UI can
  * show a readable generation log (the stage details are English; the
@@ -37,6 +39,7 @@ import type { IKResult, RobotModel } from "../kinematics/robot-model";
 import { MotionError } from "../motion/errors";
 import { CONTROL_STEP_MS, type MotionPlan, type Planner } from "../motion/planner";
 import { PipelineError, type PipelineStage } from "./errors";
+import { renderMotionPreviewGif } from "./motion-preview";
 import { toRobotCsv } from "./robot-csv";
 import { rvizAngles, toRvizCsv } from "./rviz-csv";
 
@@ -78,7 +81,7 @@ export interface PipelineInput {
   readonly planner: Planner;
 }
 
-/** Pipeline output: the Motion Plan and both exporters' bytes. */
+/** Pipeline output: the Motion Plan, both exporters' CSVs, and the Motion Preview GIF. */
 export interface PipelineResult {
   /** The validated Motion Plan (input to plots and charts). */
   readonly plan: MotionPlan;
@@ -86,6 +89,12 @@ export interface PipelineResult {
   readonly robotCsv: string;
   /** RViz CSV bytes — the sign-transformed visualization variant. */
   readonly rvizCsv: string;
+  /**
+   * Motion Preview GIF bytes — the animated isometric preview of the
+   * plan (robot skeleton, Trajectory, travelled highlight, Home Point,
+   * PTP TCP trace), written as `robot_motion.gif` next to the CSVs.
+   */
+  readonly motionGif: Uint8Array;
   /** Every stage's outcome, in run order; all succeeded. */
   readonly stages: readonly PipelineStageOutcome[];
 }
@@ -106,13 +115,14 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
   const robotCsv = toRobotCsv(plan);
   const rvizCsv = toRvizCsv(plan);
+  const motionGif = renderMotionPreviewGif({ trajectory: input.trajectory, plan, model: input.model });
   stages.push({
     stage: "export",
-    detail: `Robot CSV: ${plan.rows.length} rows, ${robotCsv.length} characters; RViz CSV: ${rvizCsv.length} characters`,
+    detail: `Robot CSV: ${plan.rows.length} rows, ${robotCsv.length} characters; RViz CSV: ${rvizCsv.length} characters; Motion Preview GIF: ${motionGif.frameCount} frames, ${motionGif.bytes.length} bytes (robot_motion.gif)`,
   });
   verifyExportedArrays(robotCsv, rvizCsv, plan);
 
-  return { plan, robotCsv, rvizCsv, stages };
+  return { plan, robotCsv, rvizCsv, motionGif: motionGif.bytes, stages };
 }
 
 /**

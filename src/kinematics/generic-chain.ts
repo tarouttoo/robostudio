@@ -391,6 +391,40 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
     return chainForwardKinematics(joints, axes, angles);
   };
 
+  /**
+   * The skeleton the Motion Preview draws: the model-frame origin, one
+   * anchor point per joint in actuation order (the frame position after
+   * this joint's `origin` translation), and the end-effector. The last
+   * point is exactly FK's result.
+   */
+  const chainPoints = (angles: readonly number[]): readonly Vec3[] => {
+    if (angles.length !== joints.length) {
+      throw new Error(`chain "${config.id}" expects ${joints.length} joint angles, got ${angles.length}`);
+    }
+    const points: Vec3[] = [[0, 0, 0]];
+    let position: Vec3 = [0, 0, 0];
+    let rotation = IDENTITY;
+    for (let i = 0; i < joints.length; i++) {
+      const joint = joints[i] as ChainJointConfig;
+      const origin = apply(rotation, joint.origin);
+      position = [
+        position[0]! + origin[0]!,
+        position[1]! + origin[1]!,
+        position[2]! + origin[2]!,
+      ];
+      points.push(position);
+      rotation = multiply(rotation, rotationAbout(axes[i] as Vec3, angles[i] as number));
+      const offset = apply(rotation, joint.offset);
+      position = [
+        position[0]! + offset[0]!,
+        position[1]! + offset[1]!,
+        position[2]! + offset[2]!,
+      ];
+    }
+    points.push(position);
+    return points;
+  };
+
   const inverseKinematics = (target: Vec3): IKResult => {
     // Phase 1 — limit-aware: steps are clamped into the joint limits, so
     // convergence yields an in-limits solution directly. Each seed gets
@@ -430,6 +464,7 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
         0,
       ),
       forwardKinematics,
+      chainPoints,
       inverseKinematics,
     },
   };

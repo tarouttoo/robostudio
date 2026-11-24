@@ -27,23 +27,23 @@ export interface RobostudioBridge {
    */
   openProject(): Promise<OpenProjectResult>;
   /**
-   * Exports the two generated CSV files: the main process shows the
-   * folder picker and writes `robot.csv` (Robot CSV) and `rviz.csv`
-   * (RViz CSV) into the chosen folder, byte-for-byte as passed. Never
-   * throws — resolves with an `ExportCsvsResult` describing the
-   * outcome.
+   * Exports the generated files: the main process shows the folder
+   * picker and writes `robot.csv` (Robot CSV), `rviz.csv` (RViz CSV),
+   * and `robot_motion.gif` (the Motion Preview GIF, binary bytes)
+   * into the chosen folder, byte-for-byte as passed. Never throws —
+   * resolves with an `ExportCsvsResult` describing the outcome.
    */
-  exportCsvs(robotCsv: string, rvizCsv: string): Promise<ExportCsvsResult>;
+  exportCsvs(robotCsv: string, rvizCsv: string, motionGif: Uint8Array): Promise<ExportCsvsResult>;
 }
 
-/** Outcome of a CSV export: folder picker → write both files. */
+/** Outcome of a generation export: folder picker → write all three files. */
 export type ExportCsvsResult =
   | {
-      /** Both files were written into the chosen folder. */
+      /** All three files were written into the chosen folder. */
       readonly kind: "exported";
       /** The folder the operator picked. */
       readonly folder: string;
-      /** Full paths of the written files: Robot CSV first, RViz CSV second. */
+      /** Full paths of the written files: Robot CSV, RViz CSV, Motion Preview GIF. */
       readonly files: readonly string[];
     }
   | { readonly kind: "canceled" }

@@ -120,9 +120,9 @@ describe("app shell", () => {
     const html = renderToString(<App />);
     expect(html).toContain("Генерация");
     expect(html).toContain("Сгенерировать");
-    expect(html).toContain("Экспорт CSV");
+    expect(html).toContain("Экспорт");
     // Export is locked until a successful generation exists.
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Экспорт CSV/);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Экспорт/);
     // Generate starts unlocked.
     expect(html).toMatch(/<button[^>]*>[^<]*Сгенерировать/);
   });

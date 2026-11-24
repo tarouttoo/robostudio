@@ -33,7 +33,8 @@ Actions, ported from mattpocock/sandcastle) that implements
   arcs), `0006` (CSV contracts), `0007` (canvas transform + geometry
   invariants), `0008` (multi-robot via config), `0009` (packaging), `0012` (headless
   pipeline in the export layer), `0013` (headless SVG charts in the
-  export layer), `0016` (chained Points, PTP Moves; drawing tools).
+  export layer), `0016` (chained Points, PTP Moves; drawing tools), `0018` (Motion
+  Preview GIF exporter).
 - [`docs/labels.md`](docs/labels.md), [`docs/triage.md`](docs/triage.md),
   [`docs/pr-body.md`](docs/pr-body.md), [`docs/agents/`](docs/agents/) —
   pipeline operations.
