@@ -16,8 +16,10 @@
  *   advance the path — a joined zero-length Segment contributes none.
  * - `pathLengthMm` is cumulative pen travel from the Home Point:
  *   analytic along each Segment's geometry, Euclidean across transits.
- *   Transits — the approach from Home, gaps between Segments, and Point
- *   moves — are single-sample hops and are counted at full distance.
+ *   Transits — the approach from Home, gaps between Segments, and PTP
+ *   Moves (a LIN Move is sampled along its line like drawn geometry,
+ *   see the Motion Type bullet below) — are single-sample hops and are
+ *   counted at full distance.
  * - The first sample of a non-empty path is the pen start pose
  *   (Home, or the first Segment's start when it coincides with Home
  *   within the merge distance).
