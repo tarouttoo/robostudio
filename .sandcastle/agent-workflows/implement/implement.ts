@@ -12,13 +12,17 @@ const PARENT_NUMBER = process.env.PARENT_NUMBER;
 const PR_BODY_PATH = path.join(outputDir(), "pr-body.md");
 
 try {
+  // Issue bodies come through `--json body --jq .body`: the `--comments`
+  // form fails with the "Projects (classic) deprecated" GraphQL error and
+  // never returned the body anyway — only the comments (same fix as
+  // shared/review-context.ts for the review's spec file).
   const issueContext =
-    safeSh(`gh issue view ${ISSUE_NUMBER} --comments`) ||
+    safeSh(`gh issue view ${ISSUE_NUMBER} --json body --jq .body`) ||
     `Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}`;
 
   const parentContext = renderParentContext(
     parseParentNumber(PARENT_NUMBER),
-    (number) => safeSh(`gh issue view ${number} --comments`),
+    (number) => safeSh(`gh issue view ${number} --json body --jq .body`),
   );
 
   const result = await sandcastle.run({

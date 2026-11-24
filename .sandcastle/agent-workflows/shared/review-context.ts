@@ -45,7 +45,10 @@ export const fetchPullRequestContext = (
     ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
     : "";
   const linkedIssue = issueNumber
-    ? safeSh(`gh issue view ${issueNumber} --comments`)
+    // `--json body --jq .body`, not `--comments`: the latter fails with the
+    // "Projects (classic) deprecated" GraphQL error and only ever printed
+    // the comments — never the issue body the review needs as its spec.
+    ? safeSh(`gh issue view ${issueNumber} --json body --jq .body`)
     : "(no linked issue found)";
 
   const reviews = JSON.parse(
