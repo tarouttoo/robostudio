@@ -22,6 +22,22 @@ import {
 /** How much one wheel notch (100 px of deltaY) scales the view, ≈1.22×. */
 const WHEEL_ZOOM_RATE = 0.002;
 
+/** The pointer position in canvas CSS pixels, from a DOM event's client coordinates. */
+function canvasPxOf(el: Element, clientX: number, clientY: number): Vec2 {
+  const rect = el.getBoundingClientRect();
+  return vec2(clientX - rect.left, clientY - rect.top);
+}
+
+/**
+ * The camera that fits a sampler's Reachability zone into `vp`, or the
+ * default camera (origin centred at the drawing scale) when no cell of
+ * the zone is reachable.
+ */
+function zoneCamera(sampler: ReachabilitySampler, vp: Viewport): Camera {
+  const zone = sampler.zoneBounds();
+  return zone !== null ? fitCamera(vp, zone) : DEFAULT_CAMERA;
+}
+
 /** Props of the drawing canvas. */
 export interface CanvasProps {
   /** Working Plane the operator draws on (affects nothing drawn: all points project into the current view). */
@@ -73,19 +89,12 @@ export function Canvas(props: CanvasProps): JSX.Element {
   const [operatorCamera, setOperatorCamera] = useState<Camera | null>(null);
   const [panning, setPanning] = useState(false);
 
-  /** The camera that fits the current Reachability zone into `vp`. */
-  const fitToZone = (vp: Viewport): Camera => {
-    const zone = props.reachability.zoneBounds();
-    return zone !== null ? fitCamera(vp, zone) : DEFAULT_CAMERA;
-  };
-
   // The startup camera, derived during render (no effect, no cascading
   // renders): the current zone fitted into the live viewport. Until the
   // operator takes over, a resize or plane switch re-fits, so the whole
   // zone stays visible.
   const startupCamera = useMemo(
-    () => (viewport !== null ? fitToZone(viewport) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fitToZone closes over the live sampler, listed here
+    () => (viewport !== null ? zoneCamera(props.reachability, viewport) : null),
     [viewport, props.reachability],
   );
   const camera = operatorCamera ?? startupCamera;
@@ -135,8 +144,7 @@ export function Canvas(props: CanvasProps): JSX.Element {
     if (!canvas || viewport === null || camera === null) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const px = vec2(e.clientX - rect.left, e.clientY - rect.top);
+      const px = canvasPxOf(canvas, e.clientX, e.clientY);
       const nextPxPerMm = camera.pxPerMm * Math.exp(-e.deltaY * WHEEL_ZOOM_RATE);
       setOperatorCamera(zoomAtCamera(camera, viewport, nextPxPerMm, px));
     };
@@ -150,8 +158,7 @@ export function Canvas(props: CanvasProps): JSX.Element {
 
   /** The pointer position in canvas CSS pixels. */
   const screenPxOf = (e: React.PointerEvent<HTMLCanvasElement>): Vec2 => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return vec2(e.clientX - rect.left, e.clientY - rect.top);
+    return canvasPxOf(e.currentTarget, e.clientX, e.clientY);
   };
 
   /** Unprojects a pointer event to plane millimetres. */
@@ -175,9 +182,14 @@ export function Canvas(props: CanvasProps): JSX.Element {
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
     const pan = panRef.current;
-    if (pan !== null && camera !== null) {
-      const px = screenPxOf(e);
-      setOperatorCamera(panCameraBy(pan.camera, vec2(px.x - pan.startPx.x, px.y - pan.startPx.y)));
+    const px = screenPxOf(e);
+    if (pan !== null && viewport !== null) {
+      const panned = panCameraBy(pan.camera, vec2(px.x - pan.startPx.x, px.y - pan.startPx.y));
+      setOperatorCamera(panned);
+      // The readout must unproject through the camera the operator sees
+      // now, not the previous render's transform (stale by one pan step).
+      props.onCursorMove(makeCanvasTransform(viewport, panned).toWorld(px));
+      return;
     }
     props.onCursorMove(planePointOf(e));
   };
@@ -212,7 +224,7 @@ export function Canvas(props: CanvasProps): JSX.Element {
         title="Показать всю зону достижимости, как при запуске"
         disabled={viewport === null || camera === null}
         onClick={() => {
-          if (viewport !== null) setOperatorCamera(fitToZone(viewport));
+          if (viewport !== null) setOperatorCamera(zoneCamera(props.reachability, viewport));
         }}
         style={{
           position: "absolute",
