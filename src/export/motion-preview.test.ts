@@ -12,6 +12,7 @@ import {
   MOTION_PREVIEW_WIDTH,
   renderMotionPreviewFrames,
   renderMotionPreviewGif,
+  rasterizePreviewFrame,
   type MotionPreviewFrame,
   type PreviewPrimitive,
 } from "./motion-preview";
@@ -401,5 +402,19 @@ describe("motion preview GIF", () => {
     expect(gif.frameCount).toBe(300);
     const decoded = decodeGifFrames(gif.bytes);
     expect(decoded.frames.length).toBe(300);
+  });
+
+  it("rasterizes the frames the dialog consumes exactly as the GIF encodes them", () => {
+    // The playback dialog draws `rasterizePreviewFrame`'s pixels (the
+    // shared renderer's raster step); the GIF encodes the same frames
+    // through the same step — decoding the GIF back must yield the
+    // identical palette-index pixels, frame for frame.
+    const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    const decoded = decodeGifFrames(gif.bytes);
+    expect(decoded.frames.length).toBe(frames.length);
+    frames.forEach((frame, i) => {
+      expect(Array.from(rasterizePreviewFrame(frame))).toEqual(decoded.frames[i]);
+    });
   });
 });
