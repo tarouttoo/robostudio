@@ -27,6 +27,7 @@ import {
   type MainView,
 } from "./generation";
 import { ChartsView } from "./ChartsView";
+import { MotionPreviewDialog } from "./MotionPreviewDialog";
 import { MIKO_MINI } from "./robot";
 import {
   draftPreviewOf,
@@ -72,10 +73,13 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * (`robot_motion.gif`) into an operator-picked folder through the
  * main process, and switches the main area to «Графики» — every chart
  * the outcome carries, rendered at Generation time by the headless
- * renderer (ADR 0013, `ChartsView.tsx`). Regeneration replaces those
- * charts with the new outcome's documents; a failed or blocked run
- * carries no charts and returns to «Чертёж». UI text is Russian per
- * GLOSSARY.md.
+ * renderer (ADR 0013, `ChartsView.tsx`). «Предпросмотр движения…»
+ * opens the playback dialog (`MotionPreviewDialog.tsx`) over the same
+ * outcome's preview frames — the shared renderer's documents (ADR
+ * 0018), the exact frames the exported GIF encodes. Regeneration
+ * replaces those charts and frames with the new outcome's documents; a
+ * failed or blocked run carries neither and returns to «Чертёж». UI
+ * text is Russian per GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
@@ -88,8 +92,12 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [exportMessage, setExportMessage] = useState<{ readonly text: string; readonly isError: boolean } | null>(null);
   /** Which main-area view is shown: the drawing canvas or the charts. */
   const [view, setView] = useState<MainView>("drawing");
+  /** Whether the Motion Preview playback dialog is open. */
+  const [previewOpen, setPreviewOpen] = useState(false);
   /** The charts of the last successful generation, carried on its outcome (ADR 0013). */
   const charts = generation !== null && generation.kind === "ok" ? generation.charts : null;
+  /** The Motion Preview frames of the last successful generation, carried on its outcome (ADR 0018). */
+  const previewFrames = generation !== null && generation.kind === "ok" ? generation.previewFrames : null;
   /** The Generation module's one export-policy answer: the export button's
    * disabled state, its stale notice, and the export guard all consume it. */
   const eligibility = exportEligibility(generation, state);
@@ -387,7 +395,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
           </section>
           <section style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
             <h2 style={{ fontSize: "1rem", margin: 0 }}>Генерация</h2>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
               <button type="button" onClick={handleGenerate}>Сгенерировать</button>
               <button
                 type="button"
@@ -395,6 +403,14 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 disabled={eligibility.kind !== "eligible"}
               >
                 Экспорт…
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                disabled={previewFrames === null}
+                title={previewFrames === null ? "Предпросмотр появится после успешной генерации" : undefined}
+              >
+                Предпросмотр движения…
               </button>
             </div>
             {generation !== null && (
@@ -584,6 +600,13 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
           )}
         </div>
       </div>
+      {previewOpen && previewFrames !== null && generation !== null && generation.kind === "ok" && (
+        <MotionPreviewDialog
+          frames={previewFrames}
+          durationMs={generation.result.plan.durationMs}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </main>
   );
 }

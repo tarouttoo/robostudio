@@ -169,7 +169,7 @@ export function renderMotionPreviewGif(input: MotionPreviewInput): MotionPreview
   );
   const gifFrames: GifFrame[] = frames.map((frame) => ({
     delayCs,
-    indexed: rasterizeFrame(frame),
+    indexed: rasterizePreviewFrame(frame),
   }));
   return {
     bytes: encodeGif({
@@ -186,9 +186,13 @@ export function renderMotionPreviewGif(input: MotionPreviewInput): MotionPreview
  * Rasterizes one frame's primitives onto the palette: background
  * first, then primitives in draw order (later draws over earlier).
  * Pure integer pixel math — no anti-aliasing, no floats in the pixel
- * buffer — so the bytes are exactly reproducible.
+ * buffer — so the bytes are exactly reproducible. This is the raster
+ * step both consumers share: the GIF encoder encodes these pixels, and
+ * the playback dialog paints these same palette indices (converted to
+ * RGB through {@link MOTION_PREVIEW_PALETTE}), so what the dialog shows
+ * is exactly what the exported GIF shows.
  */
-function rasterizeFrame(frame: MotionPreviewFrame): Uint8Array {
+export function rasterizePreviewFrame(frame: MotionPreviewFrame): Uint8Array {
   const pixels = new Uint8Array(MOTION_PREVIEW_WIDTH * MOTION_PREVIEW_HEIGHT);
   pixels.fill(MOTION_PREVIEW_COLORS.background);
   for (const primitive of frame.primitives) {

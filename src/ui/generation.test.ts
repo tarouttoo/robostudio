@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CHART_IDS, PIPELINE_STAGES, renderCharts, runPipeline } from "../export";
+import { CHART_IDS, PIPELINE_STAGES, renderCharts, renderMotionPreviewFrames, runPipeline } from "../export";
 import { line, trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
 import { createPchipPlanner } from "../motion";
@@ -246,6 +246,35 @@ describe("generation: the outcome carries its charts", () => {
     const blocked = session.run({ ...initialEditorState, home: null });
     if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
     expect("charts" in blocked).toBe(false);
+  });
+});
+
+describe("generation: the outcome carries its preview frames", () => {
+  it("a successful outcome carries the Motion Preview frames of its run", () => {
+    const outcome = okOutcome(createGenerationSession(MIKO_MINI), stateWith(REACHABLE_LINE));
+    // One frame per plan row for a plan inside the frame budget, from
+    // the first sampled moment (0 ms) to the plan's real duration.
+    expect(outcome.previewFrames.length).toBe(outcome.result.plan.rows.length);
+    expect(outcome.previewFrames[0]?.tMs).toBe(0);
+    expect(outcome.previewFrames.at(-1)?.tMs).toBe(outcome.result.plan.durationMs);
+  });
+
+  it("the carried frames are the shared renderer's output for the run's trajectory, plan, and bound model — the exported GIF's frames", () => {
+    const model = scriptedModel();
+    const outcome = okOutcome(createGenerationSession(model), stateWith(REACHABLE_LINE));
+    expect(outcome.previewFrames).toEqual(
+      renderMotionPreviewFrames({ trajectory: outcome.trajectory, plan: outcome.result.plan, model }),
+    );
+  });
+
+  it("failed and blocked outcomes carry no preview frames", () => {
+    const session = createGenerationSession(scriptedModel());
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
+    expect("previewFrames" in failed).toBe(false);
+    const blocked = session.run({ ...initialEditorState, home: null });
+    if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
+    expect("previewFrames" in blocked).toBe(false);
   });
 });
 

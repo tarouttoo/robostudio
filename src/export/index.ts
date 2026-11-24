@@ -27,5 +27,5 @@ export { CHART_IDS, renderCharts } from "./charts";
 export type { ChartId, RenderedChart } from "./charts";
 export { toRobotCsv } from "./robot-csv";
 export { rvizAngles, toRvizCsv } from "./rviz-csv";
-export { renderMotionPreviewFrames, renderMotionPreviewGif, MOTION_PREVIEW_MAX_FRAMES, MOTION_PREVIEW_WIDTH, MOTION_PREVIEW_HEIGHT, MOTION_PREVIEW_PALETTE, MOTION_PREVIEW_COLORS } from "./motion-preview";
+export { renderMotionPreviewFrames, renderMotionPreviewGif, rasterizePreviewFrame, MOTION_PREVIEW_MAX_FRAMES, MOTION_PREVIEW_WIDTH, MOTION_PREVIEW_HEIGHT, MOTION_PREVIEW_PALETTE, MOTION_PREVIEW_COLORS } from "./motion-preview";
 export type { MotionPreviewInput, MotionPreviewFrame, MotionPreviewGif, PreviewPrimitive } from "./motion-preview";
