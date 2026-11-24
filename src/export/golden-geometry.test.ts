@@ -41,21 +41,21 @@ const MOTION_SLACK = 1.05;
 const PEAK_SPEED_FACTOR = 2.5;
 
 /** The golden shape: a 100×100 mm square with an inscribed r = 50 mm circle. */
-const SQUARE_CENTER = vec3(110, 0, 60);
+const SQUARE_CENTER = vec3(226, 0, 160);
 const CIRCLE_RADIUS_MM = 50;
 
-const GOLDEN_SHAPE: Trajectory = trajectory(vec3(60, -50, 60), [
-  line({ start: vec3(60, -50, 60), end: vec3(160, -50, 60), feed: 20 }),
-  line({ start: vec3(160, -50, 60), end: vec3(160, 50, 60), feed: 20 }),
-  line({ start: vec3(160, 50, 60), end: vec3(60, 50, 60), feed: 20 }),
-  line({ start: vec3(60, 50, 60), end: vec3(60, -50, 60), feed: 20 }),
+const GOLDEN_SHAPE: Trajectory = trajectory(vec3(176, -50, 160), [
+  line({ start: vec3(176, -50, 160), end: vec3(276, -50, 160), feed: 20 }),
+  line({ start: vec3(276, -50, 160), end: vec3(276, 50, 160), feed: 20 }),
+  line({ start: vec3(276, 50, 160), end: vec3(176, 50, 160), feed: 20 }),
+  line({ start: vec3(176, 50, 160), end: vec3(176, -50, 160), feed: 20 }),
   // Pen-up transit to the circle start.
-  point({ target: vec3(160, 0, 60), feed: 40, motionType: "PTP" }),
+  point({ target: vec3(276, 0, 160), feed: 40, motionType: "PTP" }),
   // The inscribed circle, drawn CCW from (160, 0) back onto itself.
   arcFromCenter({
     plane: "XY",
-    start: vec3(160, 0, 60),
-    end: vec3(160, 0, 60),
+    start: vec3(276, 0, 160),
+    end: vec3(276, 0, 160),
     center: SQUARE_CENTER,
     direction: "CCW",
     feed: 15,
@@ -150,16 +150,16 @@ describe("golden geometry: 100×100 square with inscribed r = 50 circle (ADR 000
     const squarePen = pen.filter((_, i) => (rows[i] as CsvRow).tMs < transitStart);
     expect(squarePen.length).toBeGreaterThan(300);
     for (const p of squarePen) {
-      // The whole square phase draws at z = 60 (XY plane, no drift).
-      expect(Math.abs(p.z - 60)).toBeLessThanOrEqual(PLANE_TOLERANCE_MM);
-      // Distance to the boundary of [60, 160] × [-50, 50].
-      const toBoundary = Math.min(Math.abs(p.x - 60), Math.abs(p.x - 160), Math.abs(p.y + 50), Math.abs(p.y - 50));
+      // The whole square phase draws at z = 160 (XY plane, no drift).
+      expect(Math.abs(p.z - 160)).toBeLessThanOrEqual(PLANE_TOLERANCE_MM);
+      // Distance to the boundary of [176, 276] × [-50, 50].
+      const toBoundary = Math.min(Math.abs(p.x - 176), Math.abs(p.x - 276), Math.abs(p.y + 50), Math.abs(p.y - 50));
       expect(toBoundary).toBeLessThanOrEqual(SHAPE_TOLERANCE_MM);
     }
   });
 
   it("reconstructs the square's corners, so the edges are the drawn edges", () => {
-    const corners = [vec3(60, -50, 60), vec3(160, -50, 60), vec3(160, 50, 60), vec3(60, 50, 60)];
+    const corners = [vec3(176, -50, 160), vec3(276, -50, 160), vec3(276, 50, 160), vec3(176, 50, 160)];
     const squarePen = pen.filter((_, i) => (rows[i] as CsvRow).tMs < transitStart);
     for (const corner of corners) {
       const nearest = Math.min(...squarePen.map((p) => Math.hypot(p.x - corner.x, p.y - corner.y, p.z - corner.z)));
@@ -174,11 +174,11 @@ describe("golden geometry: 100×100 square with inscribed r = 50 circle (ADR 000
     let maxAngle = -Infinity;
     let prevAngle = 0;
     for (const p of circlePen) {
-      expect(Math.abs(p.z - 60)).toBeLessThanOrEqual(PLANE_TOLERANCE_MM);
-      const radius = Math.hypot(p.x - 110, p.y - 0);
+      expect(Math.abs(p.z - 160)).toBeLessThanOrEqual(PLANE_TOLERANCE_MM);
+      const radius = Math.hypot(p.x - 226, p.y - 0);
       expect(Math.abs(radius - CIRCLE_RADIUS_MM)).toBeLessThanOrEqual(SHAPE_TOLERANCE_MM);
       // Unwrapped angle around the center, to verify the full circle.
-      const angle = Math.atan2(p.y, p.x - 110);
+      const angle = Math.atan2(p.y, p.x - 226);
       const unwrapped = angle - 2 * Math.PI * Math.round((angle - prevAngle) / (2 * Math.PI));
       minAngle = Math.min(minAngle, unwrapped);
       maxAngle = Math.max(maxAngle, unwrapped);

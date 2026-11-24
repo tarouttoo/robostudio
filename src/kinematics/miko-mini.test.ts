@@ -82,17 +82,19 @@ describe("MiKo-mini inverse kinematics", () => {
   const model = defaultModel();
 
   it("recovers the exact shoulder-up solution", () => {
-    const q = [0.3, 0.5, -0.9];
+    const q = [0.3, 0.5, -1.2];
     const solved = expectOk(model.inverseKinematics(model.forwardKinematics(q)));
     expect(solved[0]).toBeCloseTo(0.3, 9);
     expect(solved[1]).toBeCloseTo(0.5, 9);
-    expect(solved[2]).toBeCloseTo(-0.9, 9);
+    expect(solved[2]).toBeCloseTo(-1.2, 9);
   });
 
   it("holds the IK∘FK round trip across the shoulder-up workspace", () => {
     const q1s = [-2.0, -0.9, 0, 1.1, 2.3];
-    const q2s = [-0.2, 0.35, 0.9, 1.4, 1.8];
-    const q3s = [-2.5, -1.9, -1.2, -0.6, -0.1];
+    // q2 and q3 stay inside the measured limits (ADR 0020): the grid is
+    // the physical envelope, not the ±π placeholder range.
+    const q2s = [0.3, 0.9, 1.4];
+    const q3s = [-2.6, -1.9, -1.2];
     for (const q1 of q1s) {
       for (const q2 of q2s) {
         for (const q3 of q3s) {
@@ -103,15 +105,16 @@ describe("MiKo-mini inverse kinematics", () => {
   });
 
   it("holds the round trip for elbow-down targets via the mirror solution", () => {
-    const q1s = [0, 1.1];
-    const q2s = [0.3, 0.9];
-    const q3s = [0.4, 0.9];
-    for (const q1 of q1s) {
-      for (const q2 of q2s) {
-        for (const q3 of q3s) {
-          expectRoundTrip(model, [q1, q2, q3]);
-        }
-      }
+    // The shoulder-up mirror of an elbow-down pose (q2, q3 > 0) is
+    // (q2 + 2ψ(q3), −q3); each pose here mirrors inside the measured
+    // limits (ADR 0020), so the round trip is exact.
+    const poses: readonly (readonly number[])[] = [
+      [0, 0.3, 1.2],
+      [1.1, -0.9, 1.9],
+      [0, -1.5, 1.9],
+    ];
+    for (const q of poses) {
+      expectRoundTrip(model, q);
     }
   });
 
@@ -142,15 +145,19 @@ describe("MiKo-mini IK named failure statuses", () => {
     expect(model.inverseKinematics([0, 0, -200])).toEqual({ status: "unreachable" });
   });
 
-  it("accepts a point exactly on the workspace boundary", () => {
-    // Fully extended straight ahead: cos(q3) = 1 exactly.
-    const solved = expectOk(model.inverseKinematics([2 * 159.8045 + 53, 0, 160]));
-    expect(solved[2]).toBeCloseTo(0, 9);
+  it("accepts a point exactly on the measured q2 boundary", () => {
+    // A target produced by FK at the measured q2 maximum (vertical
+    // shoulder) sits exactly on the limit; the solver returns it as ok.
+    const target = model.forwardKinematics([0, Math.PI / 2, -1.2]);
+    const solved = expectOk(model.inverseKinematics(target));
+    expect(solved[1]).toBeCloseTo(Math.PI / 2, 9);
+    expect(solved[2]).toBeCloseTo(-1.2, 9);
   });
 
   it("reports angle-limit naming the joint for a limit-violating solution", () => {
     // Behind the base axis above the shoulder, the shoulder-up fold needs
-    // q2 past +π (≈ 4.005 rad); the elbow-down mirror is not taken.
+    // q2 ≈ 4.005 rad, far past the measured q2 maximum (π/2); the
+    // elbow-down mirror is not taken.
     const result = model.inverseKinematics([40, 0, 170]);
     if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
     expect(result.joint).toBe("q2");
@@ -196,16 +203,16 @@ describe("MiKo-mini measured constants (ADR 0015)", () => {
       },
       {
         name: "q2",
-        minRad: -Math.PI,
-        maxRad: Math.PI,
+        minRad: Math.PI / 2 - 1.341,
+        maxRad: Math.PI / 2,
         maxVelocityRadS: 0.8,
         maxAccelerationRadS2: 3.0,
         maxJerkRadS3: 8.0,
       },
       {
         name: "q3",
-        minRad: -Math.PI,
-        maxRad: Math.PI,
+        minRad: -(Math.PI / 2 + 1.171),
+        maxRad: -(Math.PI / 2 - 0.594),
         maxVelocityRadS: 0.9,
         maxAccelerationRadS2: 2.5,
         maxJerkRadS3: 8.0,
@@ -223,7 +230,7 @@ describe("MiKo-mini interface contract", () => {
 
   it("reports angle-limit with the max bound for targets folded behind the base", () => {
     // Straight above the base with the tool subtracted: the shoulder-up
-    // solution needs q2 ≈ 3.86 rad > +π.
+    // solution needs q2 ≈ 3.86 rad, past the measured q2 maximum.
     const result = model.inverseKinematics([0, 0, 200]);
     if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
     expect(result.joint).toBe("q2");

@@ -27,13 +27,13 @@ function defaultModel(): RobotModel {
 }
 
 /** A line into the workspace followed by a quarter arc, both reachable. */
-const LINE_AND_ARC = trajectory(vec3(80, 0, 60), [
-  line({ start: vec3(80, 0, 60), end: vec3(100, 20, 60), feed: 20 }),
+const LINE_AND_ARC = trajectory(vec3(240, 0, 260), [
+  line({ start: vec3(240, 0, 260), end: vec3(260, 20, 260), feed: 20 }),
   arcFromCenter({
     plane: "XY",
-    start: vec3(100, 20, 60),
-    end: vec3(80, 40, 60),
-    center: vec3(80, 20, 60),
+    start: vec3(260, 20, 260),
+    end: vec3(240, 40, 260),
+    center: vec3(240, 20, 260),
     direction: "CCW",
     feed: 10,
   }),
@@ -143,9 +143,9 @@ describe("pipeline: chained Points", () => {
   const model = defaultModel();
 
   /** A drawing as the Point tool places it: a chain of reachable PTP Moves. */
-  const POINT_CHAIN = trajectory(vec3(80, 0, 60), [
-    point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
-    point({ target: vec3(80, 40, 60), feed: 30, motionType: "PTP" }),
+  const POINT_CHAIN = trajectory(vec3(240, 0, 260), [
+    point({ target: vec3(240, 113, 260), feed: 30, motionType: "PTP" }),
+    point({ target: vec3(240, 40, 260), feed: 30, motionType: "PTP" }),
   ]);
 
   it("runs a chained-Points drawing through every stage and exports the contract CSV", () => {
@@ -160,13 +160,13 @@ describe("pipeline: chained Points", () => {
     expect(result.plan.rows.length).toBeGreaterThan(1);
     // Arrival at the last Move's target in joint space.
     const [tx, ty] = model.forwardKinematics(result.plan.rows[result.plan.rows.length - 1]!.q);
-    expect(tx).toBeCloseTo(80, 6);
+    expect(tx).toBeCloseTo(240, 6);
     expect(ty).toBeCloseTo(40, 6);
   });
 
   it("checks Reachability at Move targets only: an unreachable target stops at the ik stage", () => {
-    const outOfReach = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
+    const outOfReach = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 113, 260), feed: 30, motionType: "PTP" }),
       point({ target: vec3(500, 0, 60), feed: 30, motionType: "PTP" }),
     ]);
     try {
@@ -183,9 +183,9 @@ describe("pipeline: chained Points", () => {
   it("plans and exports a mixed LIN/PTP chain end-to-end", () => {
     // A LIN Move along the drawn line, then a PTP jump to the next
     // target: one pipeline run, both Motion Types in one plan.
-    const mixed = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(40, 40, 60), feed: 30, motionType: "LIN" }),
-      point({ target: vec3(80, 80, 60), feed: 30, motionType: "PTP" }),
+    const mixed = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 40, 260), feed: 30, motionType: "LIN" }),
+      point({ target: vec3(240, 80, 260), feed: 30, motionType: "PTP" }),
     ]);
     const result = runPipeline({ trajectory: mixed, model, planner: createPchipPlanner(model) });
 
@@ -193,9 +193,9 @@ describe("pipeline: chained Points", () => {
     expect(result.plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
     // The LIN range keeps the TCP on the drawn chord.
     const linRows = result.plan.rows.filter((row) => row.segmentIndex === 0);
-    const ax = 80;
+    const ax = 240;
     const ay = 0;
-    const bx = 40;
+    const bx = 240;
     const by = 40;
     for (const row of linRows) {
       const [mx, my] = model.forwardKinematics(row.q);
@@ -206,16 +206,16 @@ describe("pipeline: chained Points", () => {
     }
     // Arrival at the last target; the CSV contract holds.
     const [tx, ty] = model.forwardKinematics(result.plan.rows[result.plan.rows.length - 1]!.q);
-    expect(tx).toBeCloseTo(80, 6);
+    expect(tx).toBeCloseTo(240, 6);
     expect(ty).toBeCloseTo(80, 6);
     expect(result.robotCsv.startsWith("t,q1,q2,q3\n")).toBe(true);
   });
 
   it("checks a LIN Move along its path: dead ground mid-line stops at the ik stage", () => {
-    // Both ends of the drawn line are solvable, but the line crosses the
-    // joint-limit-only zone near the base axis — a LIN Move must fail
-    // the pipeline where a PTP Move with the same ends passes.
-    const ends = { home: vec3(40, 80, 200), target: vec3(40, -80, 200) };
+    // Both ends of the drawn line are solvable, but the line dips near
+    // the base axis, into the joint-limit-only zone — a LIN Move must
+    // fail the pipeline where a PTP Move with the same ends passes.
+    const ends = { home: vec3(200, 200, 260), target: vec3(200, -200, 260) };
     const lin = trajectory(ends.home, [
       point({ target: ends.target, feed: 30, motionType: "LIN" }),
     ]);
@@ -242,7 +242,7 @@ describe("pipeline: named stage failures stop the chain", () => {
 
   it("fails the discretization stage on an empty Trajectory", () => {
     try {
-      runPipeline({ trajectory: trajectory(vec3(80, 0, 60), []), model, planner: createPchipPlanner(model) });
+      runPipeline({ trajectory: trajectory(vec3(240, 0, 260), []), model, planner: createPchipPlanner(model) });
       throw new Error("expected the pipeline to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PipelineError);
@@ -253,8 +253,8 @@ describe("pipeline: named stage failures stop the chain", () => {
   });
 
   it("fails the discretization stage on a Trajectory that draws nothing", () => {
-    const degenerate = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 0, 60), feed: 20 }),
+    const degenerate = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 0, 260), feed: 20 }),
     ]);
     expect(() =>
       runPipeline({ trajectory: degenerate, model, planner: createPchipPlanner(model) }),
@@ -268,8 +268,13 @@ describe("pipeline: named stage failures stop the chain", () => {
   });
 
   it("fails the ik stage naming the point outside the workspace", () => {
-    const far = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(400, 0, 60), feed: 20 }),
+    // The whole drawing sits beyond the geometric reach, so the very
+    // first ik sample — the Home Point — is named as unreachable. (A
+    // line walking out of the workspace from inside would first hit the
+    // measured q3 limit band and fail with the angle-limit message
+    // instead — see the next test.)
+    const far = trajectory(vec3(500, 0, 60), [
+      line({ start: vec3(500, 0, 60), end: vec3(550, 0, 60), feed: 20 }),
     ]);
     try {
       runPipeline({ trajectory: far, model, planner: createPchipPlanner(model) });

@@ -39,16 +39,17 @@ describe("createReachabilitySampler", () => {
   const model = defaultModel();
 
   it("classifies cells of the XY plane at the fixed coordinate: allowed near the workspace, blocked far out", () => {
-    // XY at fixed z = 0: (102.5, 2.5) is reachable, (352.5, 2.5) is not.
-    const sampler = createReachabilitySampler(model, "XY", 0);
+    // XY at fixed z = 160 (shoulder height): (202.5, 2.5) is reachable,
+    // (452.5, 2.5) is past the geometric reach and is not.
+    const sampler = createReachabilitySampler(model, "XY", 160);
     expect(sampler.cellMm).toBe(REACHABILITY_CELL_MM);
-    expect(sampler.statusAt(102.5, 2.5)).toBe("ok");
-    expect(sampler.statusAt(352.5, 2.5)).toBe("unreachable");
+    expect(sampler.statusAt(202.5, 2.5)).toBe("ok");
+    expect(sampler.statusAt(452.5, 2.5)).toBe("unreachable");
   });
 
   it("marks limit-violating cells distinctly from unreachable ones", () => {
-    // At fixed z = 210 the cells just behind the base axis (radial below
-    // the 53 mm tool) fold the shoulder-up pose past q2 = +π.
+    // At fixed z = 210 the cells at the base axis fold the shoulder-up
+    // pose far past the measured q2 maximum.
     const sampler = createReachabilitySampler(model, "XY", 210);
     expect(sampler.statusAt(2.5, 2.5)).toBe("angle-limit");
   });
@@ -62,17 +63,17 @@ describe("createReachabilitySampler", () => {
   });
 
   it("answers from the fixed coordinate: a plane beyond the workspace is blocked everywhere", () => {
-    const reachable = createReachabilitySampler(model, "XY", 0);
+    const reachable = createReachabilitySampler(model, "XY", 160);
     const lifted = createReachabilitySampler(model, "XY", 500);
-    expect(reachable.statusAt(102.5, 2.5)).toBe("ok");
-    expect(lifted.statusAt(102.5, 2.5)).toBe("unreachable");
+    expect(reachable.statusAt(202.5, 2.5)).toBe("ok");
+    expect(lifted.statusAt(202.5, 2.5)).toBe("unreachable");
   });
 
-  it("answers from the plane: the XZ cross-section through y = 0 is reachable at shoulder height", () => {
-    // planePoint("XZ", u=100, v=60, w=0) is the world point (100, 0, 60).
+  it("answers from the plane: the XZ cross-section through y = 0 is reachable at the Home Point's height", () => {
+    // planePoint("XZ", u=240, v=260, w=0) is the world point (240, 0, 260).
     const sampler = createReachabilitySampler(model, "XZ", 0);
-    expect(sampler.statusAt(100, 60)).toBe("ok");
-    expect(sampler.statusAt(100, 500)).toBe("unreachable");
+    expect(sampler.statusAt(240, 260)).toBe("ok");
+    expect(sampler.statusAt(240, 500)).toBe("unreachable");
   });
 
   it("reports the zone bounds: the cell rectangle covering every non-unreachable cell", () => {

@@ -71,8 +71,8 @@ describe("planner seam: time grid", () => {
   const planner = createPchipPlanner(model);
 
   it("plans a gentle line into strictly monotonic rows at the 20 ms control step", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -89,8 +89,8 @@ describe("planner seam: time grid", () => {
   });
 
   it("starts at the first sample's joints and ends at the last sample's joints", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
     ]);
     const { path, solutions } = planInputFromTrajectory(model, traj);
     const plan = planner.plan({ path, solutions });
@@ -102,16 +102,16 @@ describe("planner seam: time grid", () => {
     });
   });
   it("keeps velocity, acceleration, and jerk within the Robot Model's dynamic limits", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(100, 20, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(260, 20, 260), feed: 20 }),
       // Quarter arc, r = 20, about (80, 20, 60).
       {
         kind: "arc",
         plane: "XY",
-        start: vec3(100, 20, 60),
-        end: vec3(80, 40, 60),
+        start: vec3(260, 20, 260),
+        end: vec3(240, 40, 260),
         direction: "CCW",
-        center: vec3(80, 20, 60),
+        center: vec3(240, 20, 260),
         radiusMm: 20,
         sweepRad: Math.PI / 2,
         feed: 20,
@@ -127,8 +127,8 @@ describe("planner seam: time grid", () => {
   it("scales traverse time so even an aggressive Segment respects the jerk limit", () => {
     // 2 mm at 200 mm/s: nominal 10 ms, but the joint-space jerk of the
     // tight corner far exceeds 25 rad/s³ — time scaling must stretch it.
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 2, 60), feed: 200 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 2, 260), feed: 200 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
     expect(plan.durationMs).toBeGreaterThan((2 / 200) * 1000); // beyond nominal
@@ -138,8 +138,8 @@ describe("planner seam: time grid", () => {
   it("makes the per-Segment Feed set the traverse time of that Segment", () => {
     // A long line keeps the nominal regime (no dynamic-limit scaling).
     const planAt = (feed: Feed): MotionPlan =>
-      planFromTrajectory(planner, model, trajectory(vec3(80, 0, 60), [
-        line({ start: vec3(80, 0, 60), end: vec3(80, 100, 60), feed }),
+      planFromTrajectory(planner, model, trajectory(vec3(240, 0, 260), [
+        line({ start: vec3(240, 0, 260), end: vec3(240, 100, 260), feed }),
       ]));
 
     const slow = planAt(20);
@@ -164,15 +164,15 @@ describe("planner seam: segment boundaries", () => {
     });
 
   it("keeps motion continuous across a joined Segment boundary", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(100, 20, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(260, 20, 260), feed: 20 }),
       {
         kind: "arc",
         plane: "XY",
-        start: vec3(100, 20, 60),
-        end: vec3(80, 40, 60),
+        start: vec3(260, 20, 260),
+        end: vec3(240, 40, 260),
         direction: "CCW",
-        center: vec3(80, 20, 60),
+        center: vec3(240, 20, 260),
         radiusMm: 20,
         sweepRad: Math.PI / 2,
         feed: 20,
@@ -200,9 +200,9 @@ describe("planner seam: segment boundaries", () => {
   });
 
   it("removes duplicates at an exact Segment join: no zero-length ranges, no repeated poses", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
-      line({ start: vec3(80, 40, 60), end: vec3(80, 80, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
+      line({ start: vec3(240, 40, 260), end: vec3(240, 80, 260), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -221,9 +221,9 @@ describe("planner seam: segment boundaries", () => {
   });
 
   it("splits the plan into ranges by Segment and Feed", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
-      line({ start: vec3(80, 40, 60), end: vec3(80, 80, 60), feed: 5 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
+      line({ start: vec3(240, 40, 260), end: vec3(240, 80, 260), feed: 5 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -248,10 +248,10 @@ describe("planner seam: segment boundaries", () => {
   });
 
   it("plans a Point Segment transit with its own Feed", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
-      point({ target: vec3(60, 0, 60), feed: 50, motionType: "PTP" }),
-      line({ start: vec3(60, 0, 60), end: vec3(60, 40, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
+      point({ target: vec3(220, 0, 260), feed: 50, motionType: "PTP" }),
+      line({ start: vec3(220, 0, 260), end: vec3(220, 40, 260), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -262,7 +262,7 @@ describe("planner seam: segment boundaries", () => {
       expect(plan.rows[i]!.tMs).toBe(plan.rows[i - 1]!.tMs + CONTROL_STEP_MS);
     }
     const [tx, ty, tz] = model.forwardKinematics(plan.rows[plan.rows.length - 1]!.q);
-    expect(tx).toBeCloseTo(60, 6);
+    expect(tx).toBeCloseTo(220, 6);
     expect(ty).toBeCloseTo(40, 6);
     void tz;
   });
@@ -270,15 +270,15 @@ describe("planner seam: segment boundaries", () => {
   it("plans a LIN Move along the drawn straight line", () => {
     // A LIN Move is discretized per-sample, so the planned TCP traces
     // the drawn chord — unlike a PTP Move, which leaves it mid-Move.
-    const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(0, 113, 60), feed: 30, motionType: "LIN" }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 113, 260), feed: 30, motionType: "LIN" }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
     expect(plan.ranges.map((r) => r.segmentIndex)).toEqual([0]);
-    const ax = 80;
+    const ax = 240;
     const ay = 0;
-    const bx = 0;
+    const bx = 240;
     const by = 113;
     for (const row of plan.rows) {
       const [mx, my] = model.forwardKinematics(row.q);
@@ -291,9 +291,9 @@ describe("planner seam: segment boundaries", () => {
   });
 
   it("plans a mixed LIN/PTP chain with one range per Move", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(40, 40, 60), feed: 30, motionType: "LIN" }),
-      point({ target: vec3(80, 80, 60), feed: 30, motionType: "PTP" }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 40, 260), feed: 30, motionType: "LIN" }),
+      point({ target: vec3(240, 80, 260), feed: 30, motionType: "PTP" }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -303,15 +303,15 @@ describe("planner seam: segment boundaries", () => {
       expect(plan.rows[i]!.tMs).toBe(plan.rows[i - 1]!.tMs + CONTROL_STEP_MS);
     }
     const [tx, ty] = model.forwardKinematics(plan.rows[plan.rows.length - 1]!.q);
-    expect(tx).toBeCloseTo(80, 6);
+    expect(tx).toBeCloseTo(240, 6);
     expect(ty).toBeCloseTo(80, 6);
     expectWithinDynamicLimits(model, plan);
   });
 
   it("plans a chain of Point Moves as joint interpolation between the endpoint solutions", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
-      point({ target: vec3(80, 40, 60), feed: 30, motionType: "PTP" }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 113, 260), feed: 30, motionType: "PTP" }),
+      point({ target: vec3(240, 40, 260), feed: 30, motionType: "PTP" }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -319,11 +319,11 @@ describe("planner seam: segment boundaries", () => {
     expect(plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
     // The motion starts at the Home solution and arrives at the last target.
     const [hx, hy, hz] = model.forwardKinematics(plan.rows[0]!.q);
-    expect(hx).toBeCloseTo(80, 6);
+    expect(hx).toBeCloseTo(240, 6);
     expect(hy).toBeCloseTo(0, 6);
-    expect(hz).toBeCloseTo(60, 6);
+    expect(hz).toBeCloseTo(260, 6);
     const [tx, ty] = model.forwardKinematics(plan.rows[plan.rows.length - 1]!.q);
-    expect(tx).toBeCloseTo(80, 6);
+    expect(tx).toBeCloseTo(240, 6);
     expect(ty).toBeCloseTo(40, 6);
     expectWithinDynamicLimits(model, plan);
 
@@ -333,10 +333,10 @@ describe("planner seam: segment boundaries", () => {
     const interior = plan.rows.filter((row) => row.tMs > 0 && row.tMs < firstEndMs);
     const mid = interior[Math.floor(interior.length / 2)]!;
     const [mx, my] = model.forwardKinematics(mid.q);
-    // Distance from the straight chord (80,0) → (0,113).
-    const ax = 80;
+    // Distance from the straight chord (240,0) → (240,113).
+    const ax = 240;
     const ay = 0;
-    const bx = 0;
+    const bx = 240;
     const by = 113;
     const t = ((mx - ax) * (bx - ax) + (my - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2);
     const cx = ax + t * (bx - ax);
@@ -348,9 +348,9 @@ describe("planner seam: segment boundaries", () => {
     // The Point stands in for the Home Point (within the merge distance):
     // its run contributes no motion, and the joined next Segment starts
     // from its pose instead of crashing on a missing boundary pose.
-    const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(80, 0.5, 60), feed: 30, motionType: "PTP" }),
-      line({ start: vec3(80, 0.5, 60), end: vec3(80, 40, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      point({ target: vec3(240, 0.5, 260), feed: 30, motionType: "PTP" }),
+      line({ start: vec3(240, 0.5, 260), end: vec3(240, 40, 260), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -358,22 +358,22 @@ describe("planner seam: segment boundaries", () => {
     expect(plan.rows[0]?.q).toBeDefined();
     // The motion starts from the Point's pose (≈ Home) and stays continuous.
     const [px, py, pz] = model.forwardKinematics(plan.rows[0]!.q);
-    expect(px).toBeCloseTo(80, 6);
+    expect(px).toBeCloseTo(240, 6);
     expect(py).toBeGreaterThan(0.4);
     expect(py).toBeLessThan(0.6);
-    expect(pz).toBeCloseTo(60, 6);
+    expect(pz).toBeCloseTo(260, 6);
   });
 
   it("plans an empty Trajectory to an empty plan", () => {
-    const plan = planFromTrajectory(planner, model, trajectory(vec3(80, 0, 60), []));
+    const plan = planFromTrajectory(planner, model, trajectory(vec3(240, 0, 260), []));
     expect(plan.rows).toEqual([]);
     expect(plan.ranges).toEqual([]);
     expect(plan.durationMs).toBe(0);
   });
 
   it("rejects defective solutions with named errors", () => {
-    const traj = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
+    const traj = trajectory(vec3(240, 0, 260), [
+      line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
     ]);
     const path = discretizeTrajectory(traj);
     const good = path.samples.map(() => [0, 0, 0] as const);

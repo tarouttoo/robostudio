@@ -11,7 +11,7 @@ import { MIKO_MINI } from "./robot";
 import { ChartsView, chartTitle } from "./ChartsView";
 
 /** A reachable Home Point in the MiKo-mini workspace (as in generation.test.ts). */
-const HOME = vec3(80, 0, 60);
+const HOME = vec3(240, 0, 260);
 
 /** Editor state holding exactly this drawing: Home Point plus Segments. */
 function stateWith(segments: EditorState["segments"], home: EditorState["home"] = HOME): EditorState {
@@ -53,7 +53,7 @@ describe("charts view: component", () => {
   it("shows every chart of the last generation under its Russian caption", () => {
     // The documents come straight off the generation outcome — rendered
     // at Generation time, the view plots nothing itself.
-    const outcome = okOutcome([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]);
+    const outcome = okOutcome([line({ start: HOME, end: vec3(260, 0, 260), feed: 20 })]);
     const html = renderToString(<ChartsView charts={outcome.charts} />);
     expect(html).toContain("Графики");
     for (const id of CHART_IDS) {

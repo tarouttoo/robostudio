@@ -37,7 +37,10 @@ export interface MiKoMiniRobotConfig {
  * The MiKo-mini constants measured on the real prototype (ADR 0015):
  * a 160 mm shoulder column, two 159.8045 mm links (a measured value —
  * never round it), and a 53 mm horizontal tool offset, with the joint
- * and dynamic limits the motion planner must respect. Being
+ * and dynamic limits the motion planner must respect. The q2/q3 limits
+ * are the prototype's measured ranges (ADR 0020), which keep the
+ * shoulder from folding back through the base column: the unreachable
+ * zone near the robot falls out of the inverse kinematics itself. Being
  * configuration, corrected values land here without code changes.
  */
 export const DEFAULT_MIKO_MINI_CONFIG: MiKoMiniRobotConfig = {
@@ -54,18 +57,25 @@ export const DEFAULT_MIKO_MINI_CONFIG: MiKoMiniRobotConfig = {
       maxAccelerationRadS2: 2.8,
       maxJerkRadS3: 9.0,
     },
+    // q2 and q3 carry the prototype's measured limits (ADR 0020). The
+    // roboboba prototype configures them measured from vertical; this
+    // model measures from horizontal, so the conversion is
+    // q2 = π/2 − q2_vertical ∈ [π/2 − 1.341, π/2] and
+    // q3 = −q3_vertical ∈ [−(π/2 + 1.171), −(π/2 − 0.594)] (the
+    // shoulder-up branch keeps q3 ≤ 0). They are never rounded, like
+    // every measured constant here.
     {
       name: "q2",
-      minRad: -Math.PI,
-      maxRad: Math.PI,
+      minRad: Math.PI / 2 - 1.341,
+      maxRad: Math.PI / 2,
       maxVelocityRadS: 0.8,
       maxAccelerationRadS2: 3.0,
       maxJerkRadS3: 8.0,
     },
     {
       name: "q3",
-      minRad: -Math.PI,
-      maxRad: Math.PI,
+      minRad: -(Math.PI / 2 + 1.171),
+      maxRad: -(Math.PI / 2 - 0.594),
       maxVelocityRadS: 0.9,
       maxAccelerationRadS2: 2.5,
       maxJerkRadS3: 8.0,

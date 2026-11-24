@@ -20,10 +20,10 @@ import {
 import { MIKO_MINI } from "./robot";
 
 /** A reachable Home Point in the MiKo-mini workspace (as in the pipeline tests). */
-const HOME = vec3(80, 0, 60);
+const HOME = vec3(240, 0, 260);
 
 /** A Line into the workspace, starting at the Home Point. */
-const REACHABLE_LINE = [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })];
+const REACHABLE_LINE = [line({ start: HOME, end: vec3(260, 0, 260), feed: 20 })];
 
 /** Editor state holding exactly this drawing: Home Point plus Segments. */
 function stateWith(segments: EditorState["segments"], home: EditorState["home"] = HOME): EditorState {
@@ -31,7 +31,7 @@ function stateWith(segments: EditorState["segments"], home: EditorState["home"] 
 }
 
 /** The scripted model's workspace: targets past this x are unreachable, in mm. */
-const SCRIPTED_REACH_X_MM = 120;
+const SCRIPTED_REACH_X_MM = 260;
 
 /**
  * A scripted minimal Robot Model at the RobotModel seam (ADR 0004):
@@ -113,10 +113,10 @@ describe("generation: session", () => {
     const model = scriptedModel();
     const session = createGenerationSession(model);
     const short = stateWith(REACHABLE_LINE);
-    const longer = stateWith([line({ start: HOME, end: vec3(110, 0, 60), feed: 40 })]);
+    const longer = stateWith([line({ start: HOME, end: vec3(240, 40, 260), feed: 40 })]);
     // A failed run sits between the successful ones; the shared binding
     // serves every run without carrying results across.
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })]));
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     for (const state of [short, longer, short]) {
       const outcome = okOutcome(session, state);
@@ -170,7 +170,7 @@ describe("generation: session", () => {
   });
 
   it("stops with a named failure when the model cannot reach a point", () => {
-    const far = [line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })];
+    const far = [line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })];
     const outcome = createGenerationSession(scriptedModel()).run(stateWith(far));
     if (outcome.kind !== "failed") throw new Error(`expected failed, got ${outcome.kind}`);
     expect(outcome.error.stage).toBe("ik");
@@ -225,8 +225,8 @@ describe("generation: the outcome carries its charts", () => {
 
   it("regeneration replaces the carried charts with the new plan's documents", () => {
     const session = createGenerationSession(MIKO_MINI);
-    const first = okOutcome(session, stateWith([line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })]));
-    const second = okOutcome(session, stateWith([line({ start: HOME, end: vec3(180, 0, 60), feed: 20 })]));
+    const first = okOutcome(session, stateWith([line({ start: HOME, end: vec3(260, 0, 260), feed: 20 })]));
+    const second = okOutcome(session, stateWith([line({ start: HOME, end: vec3(280, 0, 260), feed: 20 })]));
     // Every chart redraws: no document survives the regeneration as-is.
     expect(second.charts.map((chart) => chart.svg)).not.toEqual(first.charts.map((chart) => chart.svg));
     // The new data is the new plan's: the time axis labels the longer
@@ -240,7 +240,7 @@ describe("generation: the outcome carries its charts", () => {
 
   it("failed and blocked outcomes carry no charts", () => {
     const session = createGenerationSession(scriptedModel());
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })]));
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     expect("charts" in failed).toBe(false);
     const blocked = session.run({ ...initialEditorState, home: null });
@@ -269,7 +269,7 @@ describe("generation: the outcome carries its preview frames", () => {
 
   it("failed and blocked outcomes carry no preview frames", () => {
     const session = createGenerationSession(scriptedModel());
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })]));
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     expect("previewFrames" in failed).toBe(false);
     const blocked = session.run({ ...initialEditorState, home: null });
@@ -295,7 +295,7 @@ describe("generation: log lines", () => {
   });
 
   it("on failure names the failing stage and the reason", () => {
-    const far = [line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })];
+    const far = [line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })];
     const outcome = createGenerationSession(scriptedModel()).run(stateWith(far));
     if (outcome.kind !== "failed") throw new Error(`expected failed, got ${outcome.kind}`);
     const lines = generationLogLines(outcome);
@@ -358,7 +358,7 @@ describe("generation: export eligibility", () => {
     const session = createGenerationSession(scriptedModel());
     const state = stateWith(REACHABLE_LINE);
     expect(exportEligibility(null, state).kind).toBe("no-success");
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })]));
     expect(exportEligibility(failed, state).kind).toBe("no-success");
     const blocked = session.run({ ...initialEditorState });
     expect(exportEligibility(blocked, state).kind).toBe("no-success");
@@ -373,11 +373,11 @@ describe("generation: landing view after an attempt", () => {
     expect(viewAfterGeneration(ok)).toBe<MainView>("charts");
     // A failed run keeps no charts: the tab locks, the operator lands
     // on the drawing while the sidebar log names the failure.
-    const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
+    const failed = session.run(stateWith([line({ start: HOME, end: vec3(500, 0, 260), feed: 20 })]));
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     expect(viewAfterGeneration(failed)).toBe<MainView>("drawing");
     // Same for a blocked start (no Home Point set).
-    const blocked = session.run({ ...initialEditorState, home: null, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
+    const blocked = session.run({ ...initialEditorState, home: null, segments: [line({ start: HOME, end: vec3(260, 0, 260), feed: 20 })] });
     if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
     expect(viewAfterGeneration(blocked)).toBe<MainView>("drawing");
   });

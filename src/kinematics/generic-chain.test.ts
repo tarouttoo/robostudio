@@ -198,8 +198,10 @@ describe("generic-chain numeric inverse kinematics", () => {
   it("holds the IK∘FK round trip across the MiKo-shaped chain's workspace", () => {
     const model = resolveModel(mikoShapedChainConfig());
     const q1s = [-2.0, -0.9, 0, 1.1, 2.3];
-    const q2s = [-0.2, 0.35, 0.9, 1.4, 1.8];
-    const q3s = [-2.5, -1.9, -1.2, -0.6, -0.1];
+    // q2 and q3 stay inside the measured limits (ADR 0020): the grid is
+    // the physical envelope, not the ±π placeholder range.
+    const q2s = [0.3, 0.9, 1.4];
+    const q3s = [-2.6, -1.9, -1.2];
     for (const q1 of q1s) {
       for (const q2 of q2s) {
         for (const q3 of q3s) {
@@ -234,9 +236,19 @@ describe("generic-chain IK named failure statuses", () => {
     expect(model.inverseKinematics([0, 0, -200])).toEqual({ status: "unreachable" });
   });
 
-  it("solves a target folded behind the base within the symmetric ±π limits", () => {
-    // With every joint limited to [−π, π], the mirror (elbow-down) pose
-    // of a behind-the-base target fits the limits and the descent finds it.
+  it("solves a target folded behind the base within symmetric ±π limits", () => {
+    // With every joint explicitly limited to [−π, π], the mirror
+    // (elbow-down) pose of a behind-the-base target fits the limits and
+    // the descent finds it — a solver capability the shipped measured
+    // limits deliberately do not exercise (ADR 0020).
+    const model = resolveModel({
+      ...mikoShapedChainConfig("miko-generic-symmetric"),
+      joints: mikoShapedChainConfig().joints.map((joint) => ({
+        ...joint,
+        minRad: -Math.PI,
+        maxRad: Math.PI,
+      })),
+    });
     const result = model.inverseKinematics([40, 0, 170]);
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expectConverges(model, [40, 0, 170]);
@@ -337,7 +349,7 @@ describe("generic-chain convergence configuration", () => {
       ik: { toleranceMm: 1e-6, maxIterations: 1, damping: 0.05 },
     });
     // Reachable with the default 200-iteration budget; one iteration is not enough.
-    expect(model.inverseKinematics(model.forwardKinematics([0.3, 0.5, -0.9]))).toEqual({
+    expect(model.inverseKinematics(model.forwardKinematics([0.3, 0.5, -1.2]))).toEqual({
       status: "unreachable",
     });
   });
@@ -347,7 +359,7 @@ describe("generic-chain convergence configuration", () => {
       ...mikoShapedChainConfig("loose-tol"),
       ik: { toleranceMm: 0.5, maxIterations: 200, damping: 0.05 },
     });
-    const target = model.forwardKinematics([0.3, 0.5, -0.9]);
+    const target = model.forwardKinematics([0.3, 0.5, -1.2]);
     const result = model.inverseKinematics(target);
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect(vec3Distance(model.forwardKinematics(result.joints), target)).toBeLessThanOrEqual(0.5);

@@ -66,13 +66,13 @@ function identityModel(): RobotModel {
 }
 
 /** A line into the workspace followed by a quarter arc, both reachable. */
-const LINE_AND_ARC: Trajectory = trajectory(vec3(80, 0, 60), [
-  line({ start: vec3(80, 0, 60), end: vec3(100, 20, 60), feed: 20 }),
+const LINE_AND_ARC: Trajectory = trajectory(vec3(240, 0, 260), [
+  line({ start: vec3(240, 0, 260), end: vec3(260, 20, 260), feed: 20 }),
   arcFromCenter({
     plane: "XY",
-    start: vec3(100, 20, 60),
-    end: vec3(80, 40, 60),
-    center: vec3(80, 20, 60),
+    start: vec3(260, 20, 260),
+    end: vec3(240, 40, 260),
+    center: vec3(240, 20, 260),
     direction: "CCW",
     feed: 10,
   }),
@@ -127,11 +127,11 @@ const TWO_PHASE_PLAN: MotionPlan = {
 };
 
 /** The 100×100 mm square the golden geometry tests guard (ADR 0007). */
-const SQUARE: Trajectory = trajectory(vec3(60, -50, 60), [
-  line({ start: vec3(60, -50, 60), end: vec3(160, -50, 60), feed: 20 }),
-  line({ start: vec3(160, -50, 60), end: vec3(160, 50, 60), feed: 20 }),
-  line({ start: vec3(160, 50, 60), end: vec3(60, 50, 60), feed: 20 }),
-  line({ start: vec3(60, 50, 60), end: vec3(60, -50, 60), feed: 20 }),
+const SQUARE: Trajectory = trajectory(vec3(176, -50, 160), [
+  line({ start: vec3(176, -50, 160), end: vec3(276, -50, 160), feed: 20 }),
+  line({ start: vec3(276, -50, 160), end: vec3(276, 50, 160), feed: 20 }),
+  line({ start: vec3(276, 50, 160), end: vec3(176, 50, 160), feed: 20 }),
+  line({ start: vec3(176, 50, 160), end: vec3(176, -50, 160), feed: 20 }),
 ]);
 
 /** A one-row plan: the degenerate case every chart must survive. */
