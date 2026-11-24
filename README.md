@@ -94,6 +94,15 @@ trigger label named in that comment. For a converted Ticket — one that was
 waiting on `ready-for-agent` — retry it by removing and re-adding
 `ready-for-agent`.
 
+Agent draft PRs are authored by `github-actions[bot]` (the "Open draft PR"
+step runs on `GITHUB_TOKEN`), so GitHub's workflow-approval gate can
+nondeterministically hold that PR's initial `pull_request` CI run as
+"awaiting approval" (`action_required`). It never blocks the pipeline: the
+`agent-review` self-fix push rides `AGENT_PAT`, its CI run is never gated,
+and that is the check the auto-merge gate (ADR 0011) waits on. A gated run
+is noise; to run it manually: `gh api -X POST
+repos/tarouttoo/robostudio/actions/runs/<run-id>/approve`.
+
 ### Required repository settings
 
 1. **Allow GitHub Actions to create and approve pull requests** (repo →
