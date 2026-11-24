@@ -50,7 +50,7 @@ const GOLDEN_SHAPE: Trajectory = trajectory(vec3(60, -50, 60), [
   line({ start: vec3(160, 50, 60), end: vec3(60, 50, 60), feed: 20 }),
   line({ start: vec3(60, 50, 60), end: vec3(60, -50, 60), feed: 20 }),
   // Pen-up transit to the circle start.
-  point({ target: vec3(160, 0, 60), feed: 40 }),
+  point({ target: vec3(160, 0, 60), feed: 40, motionType: "PTP" }),
   // The inscribed circle, drawn CCW from (160, 0) back onto itself.
   arcFromCenter({
     plane: "XY",

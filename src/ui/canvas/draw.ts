@@ -1,9 +1,10 @@
 /**
  * Canvas scene rendering: draws the millimetre grid, the axes, the
  * committed Segments, the Home Point, and the pending draft from a
- * {@link CanvasScene}. Committed chained Point Moves draw dashed from
- * where the previous Segment ended (the Home Point first), including
- * the pending draft preview. All geometry flows through the canvas
+ * {@link CanvasScene}. A committed chained Point Move draws by its
+ * Motion Type (ADR 0017): a LIN Move solid along the drawn straight
+ * line, a PTP Move dashed — only arrival is guaranteed — including the
+ * pending draft preview. All geometry flows through the canvas
  * transform, so what is drawn is exactly what the coordinates say
  * (ADR 0007); drawing happens in CSS pixels with the device pixel ratio
  * applied as the context transform, making the picture independent of
@@ -228,8 +229,9 @@ function planeVec2(plane: WorkingPlane, p: Vec3): Vec2 {
 
 /**
  * Draws one canonical Segment: Line as a stroke, Arc sampled, a Point
- * as the dashed PTP Move from its start (where the previous Segment
- * ended) plus a cross at the target.
+ * as the Move from its start (where the previous Segment ended) by its
+ * Motion Type — a LIN Move solid along the drawn line, a PTP Move
+ * dashed (only arrival is guaranteed) — plus a cross at the target.
  */
 function drawSegment(
   ctx: CanvasRenderingContext2D,
@@ -244,10 +246,13 @@ function drawSegment(
   ctx.fillStyle = color;
   ctx.lineWidth = 2;
   if (segment.kind === "point") {
-    // The PTP Move: dashed transit to the target — only arrival there
-    // is guaranteed, so only the endpoints draw.
+    // The Move to the target, drawn by its Motion Type: LIN solid (the
+    // drawn line is the geometry the Move follows), PTP dashed (only
+    // arrival is guaranteed, so only the endpoints draw).
     if (moveStart !== null) {
-      dashedPolyline(ctx, transform, [planeVec2(plane, moveStart), planeVec2(plane, segment.target)]);
+      const points = [planeVec2(plane, moveStart), planeVec2(plane, segment.target)];
+      if (segment.motionType === "LIN") solidPolyline(ctx, transform, points);
+      else dashedPolyline(ctx, transform, points);
     }
     drawCross(ctx, project(transform, plane, segment.target));
     return;
@@ -310,10 +315,15 @@ function drawDraft(
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 1.5;
-  if (draft.kind === "ptp") {
-    // The pending Move: dashed from the chain end to the cursor. There
-    // is no pending click to mark — the preview follows the cursor.
-    if (cursor !== null) dashedPolyline(ctx, transform, [draft.start, cursor]);
+  if (draft.kind === "move") {
+    // The pending Move: from the chain end to the cursor, drawn by its
+    // Motion Type — LIN solid (it would follow this line), PTP dashed.
+    // There is no pending click to mark — the preview follows the cursor.
+    if (cursor !== null) {
+      const points = [draft.start, cursor];
+      if (draft.motionType === "LIN") solidPolyline(ctx, transform, points);
+      else dashedPolyline(ctx, transform, points);
+    }
     return;
   }
   const start = transform.toScreen(draft.start);
@@ -370,10 +380,9 @@ function drawDraft(
   );
 }
 
-/** Strokes a dashed polyline through the given plane millimetre points. */
-function dashedPolyline(ctx: CanvasRenderingContext2D, transform: CanvasTransform, points: readonly Vec2[]): void {
+/** Strokes a solid polyline through the given plane millimetre points. */
+function solidPolyline(ctx: CanvasRenderingContext2D, transform: CanvasTransform, points: readonly Vec2[]): void {
   if (points.length < 2) return;
-  ctx.setLineDash([6, 4]);
   ctx.beginPath();
   for (const [i, p] of points.entries()) {
     const px = transform.toScreen(p);
@@ -381,6 +390,13 @@ function dashedPolyline(ctx: CanvasRenderingContext2D, transform: CanvasTransfor
     else ctx.lineTo(px.x, px.y);
   }
   ctx.stroke();
+}
+
+/** Strokes a dashed polyline through the given plane millimetre points. */
+function dashedPolyline(ctx: CanvasRenderingContext2D, transform: CanvasTransform, points: readonly Vec2[]): void {
+  if (points.length < 2) return;
+  ctx.setLineDash([6, 4]);
+  solidPolyline(ctx, transform, points);
   ctx.setLineDash([]);
 }
 

@@ -149,7 +149,7 @@ describe("drawScene", () => {
     const { ctx, ops } = recordingCtx();
     drawScene(ctx, {
       ...baseScene(model),
-      draft: { kind: "ptp", start: vec2(150, 0) },
+      draft: { kind: "move", motionType: "PTP", start: vec2(150, 0) },
       cursor: vec2(250, 0),
       draftViolation: { status: "unreachable", atMm: vec3(170, 0, 0) },
     });
@@ -160,9 +160,9 @@ describe("drawScene", () => {
     expect(dashedStroke?.strokeStyle).toBe(VIOLATION_COLOR);
   });
 
-  it("draws a chained Point Move dashed from the previous end to its target", () => {
+  it("draws a chained PTP Move dashed from the previous end to its target", () => {
     const { ctx, ops } = recordingCtx();
-    const scene = { ...baseScene(model), home: vec3(80, 0, 60), segments: [point({ target: vec3(100, 0, 60), feed: 20 })], violations: [null] };
+    const scene = { ...baseScene(model), home: vec3(80, 0, 60), segments: [point({ target: vec3(100, 0, 60), feed: 20, motionType: "PTP" })], violations: [null] };
     drawScene(ctx, scene);
     const from = scene.transform.toScreen(vec2(80, 0));
     const to = scene.transform.toScreen(vec2(100, 0));
@@ -179,12 +179,48 @@ describe("drawScene", () => {
     expect(dashedStroke?.strokeStyle).not.toBe(VIOLATION_COLOR);
   });
 
+  it("draws a LIN Move solid from the previous end to its target", () => {
+    const { ctx, ops } = recordingCtx();
+    const scene = { ...baseScene(model), home: vec3(80, 0, 60), segments: [point({ target: vec3(100, 0, 60), feed: 20, motionType: "LIN" })], violations: [null] };
+    drawScene(ctx, scene);
+    // The drawn line is geometry: stroked solid — no dash pattern is set.
+    expect(ops.some((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0)).toBe(false);
+    // The Move's polyline runs exactly from the chain end to the target.
+    const from = scene.transform.toScreen(vec2(80, 0));
+    const to = scene.transform.toScreen(vec2(100, 0));
+    const moveTo = ops.find((o) => o.op === "moveTo" && close2(o.args, from));
+    expect(moveTo).toBeDefined();
+    const lineTo = ops.slice(ops.indexOf(moveTo!)).find((o) => o.op === "lineTo");
+    expect(lineTo?.args[0]).toBeCloseTo(to.x, 6);
+    expect(lineTo?.args[1]).toBeCloseTo(to.y, 6);
+  });
+
+  it("flags a violating LIN Move in red along its solid Move", () => {
+    const { ctx, ops } = recordingCtx();
+    // A LIN Move from the chain end to an unreachable target: flagged
+    // in red, and the drawn line still strokes solid.
+    const violating = point({ target: vec3(30, 30, 500), feed: 20, motionType: "LIN" });
+    const fromWorld = vec3(20, 20, 500);
+    drawScene(ctx, {
+      ...baseScene(model),
+      home: fromWorld,
+      segments: [violating],
+      violations: [checkSegmentReachability(model, violating, fromWorld)],
+    });
+    expect(ops.some((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0)).toBe(false);
+    const from = baseScene(model).transform.toScreen(vec2(20, 20));
+    const moveTo = ops.find((o) => o.op === "moveTo" && close2(o.args, from));
+    expect(moveTo).toBeDefined();
+    const stroke = ops.slice(ops.indexOf(moveTo!)).find((o) => o.op === "stroke");
+    expect(stroke?.strokeStyle).toBe(VIOLATION_COLOR);
+  });
+
   it("chains consecutive Point Moves: each dashed Move starts at the previous target", () => {
     const { ctx, ops } = recordingCtx();
     const scene = {
       ...baseScene(model),
       home: vec3(80, 0, 60),
-      segments: [point({ target: vec3(20, 0, 60), feed: 20 }), point({ target: vec3(20, 30, 60), feed: 20 })],
+      segments: [point({ target: vec3(20, 0, 60), feed: 20, motionType: "PTP" }), point({ target: vec3(20, 30, 60), feed: 20, motionType: "PTP" })],
       violations: [null, null],
     };
     drawScene(ctx, scene);
@@ -206,7 +242,7 @@ describe("drawScene", () => {
 
   it("flags a violating Point Move in red along its dashed Move", () => {
     const { ctx, ops } = recordingCtx();
-    const violating = point({ target: vec3(500, 0, 60), feed: 20 });
+    const violating = point({ target: vec3(500, 0, 60), feed: 20, motionType: "PTP" });
     drawScene(ctx, {
       ...baseScene(model),
       home: vec3(80, 0, 60),
@@ -224,7 +260,7 @@ describe("drawScene", () => {
     drawScene(ctx, {
       ...baseScene(model),
       home: null,
-      segments: [point({ target: vec3(20, 0, 60), feed: 20 })],
+      segments: [point({ target: vec3(20, 0, 60), feed: 20, motionType: "PTP" })],
       violations: [null],
     });
     const dashIndex = ops.findIndex((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0);
@@ -237,7 +273,7 @@ describe("drawScene", () => {
     const { ctx, ops } = recordingCtx();
     const scene = {
       ...baseScene(model),
-      draft: { kind: "ptp" as const, start: vec2(10, 0) },
+      draft: { kind: "move" as const, motionType: "PTP" as const, start: vec2(10, 0) },
       cursor: vec2(30, 0),
       draftViolation: null,
     };
@@ -256,7 +292,33 @@ describe("drawScene", () => {
     const dashedStroke = run.find((o) => o.op === "stroke");
     expect(dashedStroke?.strokeStyle).not.toBe(VIOLATION_COLOR);
   });
+
+  it("draws the pending LIN Move solid from the chain end to the cursor", () => {
+    const { ctx, ops } = recordingCtx();
+    const scene = {
+      ...baseScene(model),
+      draft: { kind: "move" as const, motionType: "LIN" as const, start: vec2(10, 0) },
+      cursor: vec2(30, 0),
+      draftViolation: null,
+    };
+    drawScene(ctx, scene);
+    const from = scene.transform.toScreen(vec2(10, 0));
+    const to = scene.transform.toScreen(vec2(30, 0));
+    expect(ops.some((o) => o.op === "setLineDash" && (o.args[0] as number[]).length > 0)).toBe(false);
+    const moveTo = ops.find((o) => o.op === "moveTo" && close2(o.args, from));
+    expect(moveTo).toBeDefined();
+    const lineTo = ops.slice(ops.indexOf(moveTo!)).find((o) => o.op === "lineTo");
+    expect(lineTo?.args[0]).toBeCloseTo(to.x, 6);
+    expect(lineTo?.args[1]).toBeCloseTo(to.y, 6);
+  });
 });
+
+/** True when the recorded op's first two args are the given screen point. */
+function close2(args: readonly unknown[], p: Vec2): boolean {
+  return (
+    Math.abs((args[0] as number) - p.x) < 1e-6 && Math.abs((args[1] as number) - p.y) < 1e-6
+  );
+}
 
 /** The chord every arc scenario below draws along: (0,0) → (8,0). */
 const START = vec2(0, 0);

@@ -25,6 +25,7 @@ export type { Vec2, Vec3 } from "./vec";
 export { add, distance, length, lerp, scale, sub, vec2, vec3 } from "./vec";
 export {
   assertFinitePoint,
+  assertMotionType,
   assertPositiveFeed,
   line,
   point,
@@ -36,6 +37,7 @@ export type {
   ArcSegment,
   Feed,
   LineSegment,
+  MotionType,
   PointSegment,
   Segment,
   Trajectory,

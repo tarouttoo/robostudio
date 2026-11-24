@@ -1,12 +1,16 @@
 /**
  * The drawing editor's application state: the Working Plane with its
- * fixed coordinate, the Feed, the active tool, the Home Point, and the
- * canonical Segments in draw order. A plain reducer over immutable
- * records — drawn geometry enters the state as canonical Segments built
- * by the core (`point`), never as screen coordinates. Drawing places a
- * chain of Points: every click of the Point tool adds a Point whose PTP
- * Move starts where the previous Segment ended (the first at the Home
- * Point).
+ * fixed coordinate, the Feed, the Motion Type of the next Move, the
+ * active tool, the Home Point, and the canonical Segments in draw
+ * order. A plain reducer over immutable records — drawn geometry enters
+ * the state as canonical Segments built by the core (`point`), never as
+ * screen coordinates. Drawing places a chain of Points: every click of
+ * the Point tool adds a Point whose Move starts where the previous
+ * Segment ended (the first at the Home Point), travelling by the
+ * selected Motion Type — LIN (по прямой) by default, PTP (в точку) when
+ * the toggle says so (ADR 0017). Committed Moves stay editable: the
+ * reducer rewrites one Move's Motion Type or Feed, the way the drawing
+ * itself is never touched by an edit.
  *
  * Unit conventions follow GLOSSARY.md: the UI works in mm/min (CNC
  * convention), the internal unit is mm/s; conversion happens here, in
@@ -26,6 +30,7 @@ import {
   vec2,
   vec3,
   type ArcDirection,
+  type MotionType,
   type Segment,
   type Vec2,
   type Vec3,
@@ -36,6 +41,9 @@ import { DEFAULT_MIKO_MINI_HOME_MM } from "../kinematics/miko-mini";
 
 /** Arc travel direction, re-exported for the UI that configures it. */
 export type { ArcDirection };
+
+/** How a Move travels (GLOSSARY.md: Motion Type), re-exported for the UI. */
+export type { MotionType };
 
 /** The active drawing tool: Point (one click per chained Point), Arc, or Home Point (one click). */
 export type EditorTool = "point" | "arc" | "home";
@@ -57,6 +65,8 @@ export interface EditorState {
   readonly fixedMm: number;
   /** Feed shown in the UI, in mm/min. */
   readonly feedMmMin: number;
+  /** Motion Type the next committed Point Move travels by (ADR 0017). */
+  readonly motionType: MotionType;
   /** Active tool. */
   readonly tool: EditorTool;
   /** How the Arc tool defines an Arc. */
@@ -92,12 +102,13 @@ export const DEFAULT_HOME_POINT = vec3(
   DEFAULT_MIKO_MINI_HOME_MM[2],
 );
 
-/** The initial editor state: XY plane at fixed 0, chained Point tool, default Home Point. */
+/** The initial editor state: XY plane at fixed 0, chained Point tool, Motion Type LIN, default Home Point. */
 export const initialEditorState: EditorState = {
   plane: "XY",
   fixedMm: 0,
   feedMmMin: DEFAULT_FEED_MM_MIN,
   tool: "point",
+  motionType: "LIN",
   arcMode: "radius",
   arcDirection: "CCW",
   arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
@@ -113,6 +124,7 @@ export type EditorAction =
   | { readonly type: "setPlane"; readonly plane: WorkingPlane }
   | { readonly type: "setFixedMm"; readonly raw: string }
   | { readonly type: "setFeedMmMin"; readonly raw: string }
+  | { readonly type: "setMotionType"; readonly motionType: MotionType }
   | { readonly type: "setTool"; readonly tool: EditorTool }
   | { readonly type: "setArcMode"; readonly mode: ArcMode }
   | { readonly type: "setArcDirection"; readonly direction: ArcDirection }
@@ -120,6 +132,7 @@ export type EditorAction =
   | { readonly type: "canvasClick"; readonly u: number; readonly v: number }
   | { readonly type: "numericEntry"; readonly u: number; readonly v: number }
   | { readonly type: "setSegmentFeedMmMin"; readonly index: number; readonly raw: string }
+  | { readonly type: "setSegmentMotionType"; readonly index: number; readonly motionType: MotionType }
   | { readonly type: "cancelDraft" }
   | { readonly type: "undo" }
   | { readonly type: "clear" }
@@ -133,15 +146,16 @@ export function mmMinToMmS(feedMmMin: number): number {
 }
 
 /**
- * The pending draft as the canvas view needs it: the pending PTP Move
- * the Point tool previews, and which Arc clicks are done with which
- * parameters. A pure projection of the editor state — the canvas holds
+ * The pending draft as the canvas view needs it: the pending Point
+ * Move the Point tool previews (carrying its Motion Type), and which
+ * Arc clicks are done with which parameters. A pure projection of the
+ * editor state — the canvas holds
  * no geometry state itself (ADR 0007). Null when the active tool holds
  * no draft.
  */
 export type DraftPreview =
-  /** The pending PTP Move: dashed from the chain end to the cursor. */
-  | { readonly kind: "ptp"; readonly start: Vec2 }
+  /** The pending Move: drawn by its Motion Type from the chain end. */
+  | { readonly kind: "move"; readonly motionType: MotionType; readonly start: Vec2 }
   | {
       readonly kind: "arcRadius";
       readonly start: Vec2;
@@ -170,12 +184,12 @@ function chainEndOf(state: EditorState): Vec3 | null {
 /** Projects the editor state onto the draft descriptor the canvas draws. */
 export function draftPreviewOf(state: EditorState): DraftPreview | null {
   if (state.tool === "point") {
-    // The pending PTP Move: from the chain end (previous Segment's end,
+    // The pending Move: from the chain end (previous Segment's end,
     // the Home Point first), projected into the plane's millimetres.
     const pen = chainEndOf(state);
     if (pen === null) return null;
     const coords = planeCoords(state.plane, pen);
-    return { kind: "ptp", start: vec2(coords.u, coords.v) };
+    return { kind: "move", motionType: state.motionType, start: vec2(coords.u, coords.v) };
   }
   if (state.draftStart === null) return null;
   if (state.tool === "arc") {
@@ -236,6 +250,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         feedMmMin: parsePositiveNumberOr(action.raw, state.feedMmMin),
       };
+    case "setMotionType":
+      // Applies to Moves committed from now on; drawn Segments are
+      // edited one by one in the segment list instead.
+      return { ...state, motionType: action.motionType };
     case "setTool":
       return { ...state, tool: action.tool, draftStart: null, draftCenter: null, error: null };
     case "setArcMode":
@@ -255,8 +273,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (state.tool === "home") return { ...state, home: target, error: null };
       if (state.tool === "arc") return arcClick(state, uv, target);
       // The Point tool: every click commits one more Point in the chain,
-      // a PTP Move to the target without drawn geometry.
-      const segment = point({ target, feed: mmMinToMmS(state.feedMmMin) });
+      // a Move to the target without drawn geometry, travelling by the
+      // selected Motion Type.
+      const segment = point({
+        target,
+        feed: mmMinToMmS(state.feedMmMin),
+        motionType: state.motionType,
+      });
       return { ...state, segments: [...state.segments, segment], error: null };
     }
     case "numericEntry":
@@ -273,6 +296,18 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         segments: state.segments.map((s, i) => (i === action.index ? { ...s, feed } : s)),
+      };
+    }
+    case "setSegmentMotionType": {
+      // A Move's Motion Type is editable after drawing, the way its Feed
+      // is: the edit rewrites that one field of that one Point Segment.
+      const segment = state.segments[action.index];
+      if (segment === undefined || segment.kind !== "point") return state;
+      return {
+        ...state,
+        segments: state.segments.map((s, i) =>
+          i === action.index && s.kind === "point" ? { ...s, motionType: action.motionType } : s,
+        ),
       };
     }
     case "cancelDraft":

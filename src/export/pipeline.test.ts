@@ -103,8 +103,8 @@ describe("pipeline: chained Points", () => {
 
   /** A drawing as the Point tool places it: a chain of reachable PTP Moves. */
   const POINT_CHAIN = trajectory(vec3(80, 0, 60), [
-    point({ target: vec3(0, 113, 60), feed: 30 }),
-    point({ target: vec3(80, 40, 60), feed: 30 }),
+    point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
+    point({ target: vec3(80, 40, 60), feed: 30, motionType: "PTP" }),
   ]);
 
   it("runs a chained-Points drawing through every stage and exports the contract CSV", () => {
@@ -125,8 +125,8 @@ describe("pipeline: chained Points", () => {
 
   it("checks Reachability at Move targets only: an unreachable target stops at the ik stage", () => {
     const outOfReach = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(0, 113, 60), feed: 30 }),
-      point({ target: vec3(500, 0, 60), feed: 30 }),
+      point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
+      point({ target: vec3(500, 0, 60), feed: 30, motionType: "PTP" }),
     ]);
     try {
       runPipeline({ trajectory: outOfReach, model, planner: createPchipPlanner(model) });
@@ -137,6 +137,62 @@ describe("pipeline: chained Points", () => {
       expect(pipelineError.stage).toBe("ik");
       expect(pipelineError.message).toContain("segment 1");
     }
+  });
+
+  it("plans and exports a mixed LIN/PTP chain end-to-end", () => {
+    // A LIN Move along the drawn line, then a PTP jump to the next
+    // target: one pipeline run, both Motion Types in one plan.
+    const mixed = trajectory(vec3(80, 0, 60), [
+      point({ target: vec3(40, 40, 60), feed: 30, motionType: "LIN" }),
+      point({ target: vec3(80, 80, 60), feed: 30, motionType: "PTP" }),
+    ]);
+    const result = runPipeline({ trajectory: mixed, model, planner: createPchipPlanner(model) });
+
+    expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
+    expect(result.plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
+    // The LIN range keeps the TCP on the drawn chord.
+    const linRows = result.plan.rows.filter((row) => row.segmentIndex === 0);
+    const ax = 80;
+    const ay = 0;
+    const bx = 40;
+    const by = 40;
+    for (const row of linRows) {
+      const [mx, my] = model.forwardKinematics(row.q);
+      const t = ((mx - ax) * (bx - ax) + (my - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2);
+      const cx = ax + t * (bx - ax);
+      const cy = ay + t * (by - ay);
+      expect(Math.hypot(mx - cx, my - cy)).toBeLessThan(1);
+    }
+    // Arrival at the last target; the CSV contract holds.
+    const [tx, ty] = model.forwardKinematics(result.plan.rows[result.plan.rows.length - 1]!.q);
+    expect(tx).toBeCloseTo(80, 6);
+    expect(ty).toBeCloseTo(80, 6);
+    expect(result.robotCsv.startsWith("t,q1,q2,q3\n")).toBe(true);
+  });
+
+  it("checks a LIN Move along its path: dead ground mid-line stops at the ik stage", () => {
+    // Both ends of the drawn line are solvable, but the line crosses the
+    // joint-limit-only zone near the base axis — a LIN Move must fail
+    // the pipeline where a PTP Move with the same ends passes.
+    const ends = { home: vec3(40, 80, 200), target: vec3(40, -80, 200) };
+    const lin = trajectory(ends.home, [
+      point({ target: ends.target, feed: 30, motionType: "LIN" }),
+    ]);
+    try {
+      runPipeline({ trajectory: lin, model, planner: createPchipPlanner(model) });
+      throw new Error("expected the pipeline to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PipelineError);
+      const pipelineError = error as PipelineError;
+      expect(pipelineError.stage).toBe("ik");
+      expect(pipelineError.message).toContain("segment 0");
+    }
+    // The same drawing as PTP passes: only the endpoints are checked.
+    const ptp = trajectory(ends.home, [
+      point({ target: ends.target, feed: 30, motionType: "PTP" }),
+    ]);
+    const result = runPipeline({ trajectory: ptp, model, planner: createPchipPlanner(model) });
+    expect(result.stages.map((s) => s.stage)).toEqual(PIPELINE_STAGES);
   });
 });
 

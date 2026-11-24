@@ -24,7 +24,7 @@ function fullContent(): ProjectContent {
         direction: "CCW",
         feed: 30,
       }),
-      point({ target: vec3(1, 2, 3), feed: 40 }),
+      point({ target: vec3(1, 2, 3), feed: 40, motionType: "LIN" }),
     ],
   };
 }
@@ -47,7 +47,7 @@ describe("serializeProject", () => {
         center: { x: 0, y: 0, z: 0 },
         feed: 30,
       },
-      { kind: "point", target: { x: 1, y: 2, z: 3 }, feed: 40 },
+      { kind: "point", target: { x: 1, y: 2, z: 3 }, feed: 40, motionType: "LIN" },
     ]);
   });
 
@@ -80,6 +80,39 @@ describe("parseProject", () => {
   it("parses a file without the trailing newline", () => {
     const content = fullContent();
     expect(parseProject(serializeProject(content).trimEnd())).toEqual(content);
+  });
+
+  it("round-trips a PTP Move's Motion Type", () => {
+    const content: ProjectContent = {
+      ...fullContent(),
+      segments: [point({ target: vec3(4, 5, 6), feed: 25, motionType: "PTP" })],
+    };
+    expect(parseProject(serializeProject(content))).toEqual(content);
+  });
+
+  it("reads a legacy Point without a Motion Type as PTP (the pre-LIN semantics)", () => {
+    // Files written before the Motion Type existed (ADR 0017) hold
+    // chained PTP Moves; loading them must not silently turn the jumps
+    // into drawn lines.
+    const legacy = {
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      view: { plane: "XY", fixedMm: 0, feedMmMin: 1200 },
+      home: { x: 0, y: 0, z: 0 },
+      segments: [{ kind: "point", target: { x: 1, y: 2, z: 3 }, feed: 40 }],
+    };
+    const content = parseProject(JSON.stringify(legacy));
+    const seg = content.segments[0];
+    expect(seg?.kind).toBe("point");
+    if (seg?.kind !== "point") return;
+    expect(seg.motionType).toBe("PTP");
+  });
+
+  it("rejects a Point with an unknown Motion Type by name", () => {
+    const file = JSON.parse(serializeProject(fullContent())) as { segments: Array<Record<string, unknown>> };
+    file.segments[2]!["motionType"] = "G1";
+    const error = captureError(() => parseProject(JSON.stringify(file)));
+    expect(error.tag).toBe("InvalidProjectFile");
+    expect(error.message).toContain("G1");
   });
 
   it.each([

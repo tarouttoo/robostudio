@@ -44,19 +44,28 @@ describe("line segment", () => {
 });
 
 describe("point segment", () => {
-  it("stores its target and feed", () => {
-    const seg = point({ target: vec3(10, 5, 0), feed: 15 });
-    expect(seg.kind).toBe("point");
-    expect(seg.target).toEqual(vec3(10, 5, 0));
-    expect(seg.feed).toBe(15);
+  it("stores its target, feed, and Motion Type", () => {
+    const lin = point({ target: vec3(10, 5, 0), feed: 15, motionType: "LIN" });
+    expect(lin.kind).toBe("point");
+    expect(lin.target).toEqual(vec3(10, 5, 0));
+    expect(lin.feed).toBe(15);
+    expect(lin.motionType).toBe("LIN");
+    const ptp = point({ target: vec3(10, 5, 0), feed: 15, motionType: "PTP" });
+    expect(ptp.motionType).toBe("PTP");
+  });
+
+  it("rejects an unknown Motion Type with a named error", () => {
+    expect(errorTagOf(() => point({ target: vec3(1, 2, 3), feed: 15, motionType: "G1" as "LIN" }))).toBe(
+      "InvalidMotionType",
+    );
   });
 
   it("rejects a non-positive feed with a named error", () => {
-    expect(errorTagOf(() => point({ target: vec3(1, 2, 3), feed: 0 }))).toBe("InvalidFeed");
+    expect(errorTagOf(() => point({ target: vec3(1, 2, 3), feed: 0, motionType: "PTP" }))).toBe("InvalidFeed");
   });
 
   it("rejects a non-finite target with a named error", () => {
-    expect(errorTagOf(() => point({ target: vec3(1, Number.NaN, 3), feed: 15 }))).toBe(
+    expect(errorTagOf(() => point({ target: vec3(1, Number.NaN, 3), feed: 15, motionType: "LIN" }))).toBe(
       "InvalidCoordinate",
     );
   });
@@ -65,7 +74,7 @@ describe("point segment", () => {
 describe("trajectory", () => {
   it("holds the home point and the ordered segments", () => {
     const a = line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 20 });
-    const b = point({ target: vec3(10, 10, 0), feed: 15 });
+    const b = point({ target: vec3(10, 10, 0), feed: 15, motionType: "PTP" });
     const traj = trajectory(vec3(0, 0, 0), [a, b]);
     expect(traj.home).toEqual(vec3(0, 0, 0));
     expect(traj.segments).toEqual([a, b]);
@@ -73,7 +82,7 @@ describe("trajectory", () => {
 
   it("exposes each segment's start and end uniformly", () => {
     const l = line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 20 });
-    const p = point({ target: vec3(10, 10, 0), feed: 15 });
+    const p = point({ target: vec3(10, 10, 0), feed: 15, motionType: "LIN" });
     expect(segmentEnds(l)).toEqual({
       start: vec3(0, 0, 0),
       end: vec3(10, 0, 0),

@@ -26,6 +26,16 @@ export type WorkingPlane = "XY" | "XZ" | "YZ";
 /** Arc travel direction: CW (по часовой) or CCW (против часовой). */
 export type ArcDirection = "CW" | "CCW";
 
+/**
+ * How a Move travels (GLOSSARY.md: Motion Type): `"LIN"` follows the
+ * drawn straight line — per-sample Discretization, IK and Reachability
+ * along the path, drawn solid; `"PTP"` guarantees only arrival at the
+ * target — the joints interpolate directly between the endpoint
+ * solutions, the canvas draws the Move dashed, and Reachability is
+ * checked at the target only (ADR 0016, ADR 0017).
+ */
+export type MotionType = "LIN" | "PTP";
+
 /** A Segment defined by start and end. */
 export interface LineSegment {
   readonly kind: "line";
@@ -40,9 +50,12 @@ export interface LineSegment {
 /**
  * A Segment that moves the pen to a target without drawing geometry.
  * Points are chained: each Move starts where the previous Segment
- * ended (the first at the Home Point) and travels as a PTP Move — only
- * arrival at the target is guaranteed, so the Discretization samples
- * the endpoints alone and Reachability is checked at the target only.
+ * ended (the first at the Home Point) and travels by its Motion Type —
+ * a LIN Move follows the drawn straight line (per-sample
+ * Discretization, Reachability along the path, drawn solid); a PTP
+ * Move guarantees only arrival at the target, so the Discretization
+ * samples the endpoints alone and Reachability is checked at the
+ * target only (ADR 0016, ADR 0017).
  */
 export interface PointSegment {
   readonly kind: "point";
@@ -50,6 +63,8 @@ export interface PointSegment {
   readonly target: Vec3;
   /** Traverse speed for this Segment. */
   readonly feed: Feed;
+  /** How the Move travels: along the drawn line (LIN) or arrive-only (PTP). */
+  readonly motionType: MotionType;
 }
 
 /**
@@ -109,11 +124,16 @@ export function line(spec: {
   return { kind: "line", start: spec.start, end: spec.end, feed: spec.feed };
 }
 
-/** Builds a Point Segment (a chained PTP Move without drawn geometry). */
-export function point(spec: { readonly target: Vec3; readonly feed: Feed }): PointSegment {
+/** Builds a Point Segment: a chained Move carrying its own Motion Type. */
+export function point(spec: {
+  readonly target: Vec3;
+  readonly feed: Feed;
+  readonly motionType: MotionType;
+}): PointSegment {
   assertFinitePoint(spec.target, "point target");
   assertPositiveFeed(spec.feed, "point");
-  return { kind: "point", target: spec.target, feed: spec.feed };
+  assertMotionType(spec.motionType, "point");
+  return { kind: "point", target: spec.target, feed: spec.feed, motionType: spec.motionType };
 }
 
 /**
@@ -145,6 +165,21 @@ export function segmentEnds(seg: Segment): { readonly start: Vec3; readonly end:
 export function assertPositiveFeed(feed: Feed, what: string): void {
   if (!(Number.isFinite(feed) && feed > 0)) {
     throw new CoreError("InvalidFeed", `${what} feed must be a positive number of mm/s, got ${feed}`);
+  }
+}
+
+/**
+ * Validates that a Motion Type is one of the two known kinds. A wrong
+ * value can only arrive from untyped input (a Project File's JSON),
+ * where it would otherwise silently change how the Move is sampled and
+ * drawn.
+ */
+export function assertMotionType(motionType: MotionType, what: string): void {
+  if (motionType !== "LIN" && motionType !== "PTP") {
+    throw new CoreError(
+      "InvalidMotionType",
+      `${what} motion type must be "LIN" or "PTP", got ${JSON.stringify(motionType)}`,
+    );
   }
 }
 

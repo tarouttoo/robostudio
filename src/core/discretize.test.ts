@@ -196,7 +196,7 @@ describe("transits", () => {
   it("moves to a Point target as a single transit sample", () => {
     const traj = trajectory(vec3(0, 0, 0), [
       line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),
-      point({ target: vec3(20, 0, 0), feed: 15 }),
+      point({ target: vec3(20, 0, 0), feed: 15, motionType: "PTP" }),
     ]);
     const path = discretizeTrajectory(traj);
     expect(path.samples).toHaveLength(22);
@@ -210,8 +210,8 @@ describe("transits", () => {
 
   it("samples a chain of Point Moves at the endpoint poses only", () => {
     const traj = trajectory(vec3(0, 0, 0), [
-      point({ target: vec3(10, 0, 0), feed: 15 }),
-      point({ target: vec3(10, 10, 0), feed: 15 }),
+      point({ target: vec3(10, 0, 0), feed: 15, motionType: "PTP" }),
+      point({ target: vec3(10, 10, 0), feed: 15, motionType: "PTP" }),
     ]);
     const path = discretizeTrajectory(traj);
     // Exactly three poses: the Home start and both Move targets — no
@@ -228,10 +228,103 @@ describe("transits", () => {
   it("emits no sample for a Point whose target merges with the join", () => {
     const traj = trajectory(vec3(0, 0, 0), [
       line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),
-      point({ target: vec3(10.5, 0, 0), feed: 15 }),
+      point({ target: vec3(10.5, 0, 0), feed: 15, motionType: "PTP" }),
     ]);
     const path = discretizeTrajectory(traj);
     expect(path.samples).toHaveLength(21);
+    expect(path.totalLengthMm).toBeCloseTo(10, 10);
+  });
+});
+
+describe("discretization of LIN Point Moves", () => {
+  it("samples a LIN Move along the drawn straight line at ≤ 0.5 mm with exact endpoints", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      point({ target: vec3(10, 0, 0), feed: 15, motionType: "LIN" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // 10 mm at ≤ 0.5 mm → 20 intervals, 21 samples: the Home start and
+    // the per-sample straight line to the target.
+    expect(path.samples).toHaveLength(21);
+    const first = path.samples[0];
+    expect(first?.position).toEqual(vec3(0, 0, 0));
+    expect(first?.pathLengthMm).toBe(0);
+    expect(first?.feed).toBe(15);
+    expect(first?.segmentIndex).toBe(0);
+    const last = path.samples.at(-1);
+    expect(last?.position).toEqual(vec3(10, 0, 0));
+    expect(last?.pathLengthMm).toBeCloseTo(10, 10);
+    for (const sample of path.samples) {
+      expect(distance(sample.position, vec3(0, 0, 0))).toBeLessThanOrEqual(10 + 1e-9);
+      // Every sample sits exactly on the drawn chord.
+      expect(sample.position.y).toBe(0);
+      expect(sample.position.z).toBe(0);
+    }
+    expectMonotonicLengths(path.samples);
+  });
+
+  it("continues a LIN Move from the previous Segment's end without duplicating the join", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),
+      point({ target: vec3(20, 0, 0), feed: 15, motionType: "LIN" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // 21 line samples + 20 LIN samples: the join at (10, 0, 0) counts once.
+    expect(path.samples).toHaveLength(41);
+    expect(path.samples[20]?.position).toEqual(vec3(10, 0, 0));
+    expect(path.samples[20]?.segmentIndex).toBe(0);
+    expect(path.samples[21]?.position).toEqual(vec3(10.5, 0, 0));
+    expect(path.samples[21]?.segmentIndex).toBe(1);
+    expect(path.samples[21]?.feed).toBe(15);
+    expect(path.totalLengthMm).toBeCloseTo(20, 10);
+    expectMonotonicLengths(path.samples);
+  });
+
+  it("samples a mixed LIN/PTP chain: dense along LIN, endpoints only for PTP", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      point({ target: vec3(10, 0, 0), feed: 15, motionType: "LIN" }),
+      point({ target: vec3(30, 0, 0), feed: 15, motionType: "PTP" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // 21 dense samples along the LIN chord, then one PTP hop sample.
+    expect(path.samples).toHaveLength(22);
+    expect(path.samples[20]?.position).toEqual(vec3(10, 0, 0));
+    const hop = path.samples.at(-1);
+    expect(hop?.position).toEqual(vec3(30, 0, 0));
+    expect(hop?.segmentIndex).toBe(1);
+    expect(path.totalLengthMm).toBeCloseTo(30, 10);
+    expectMonotonicLengths(path.samples);
+  });
+
+  it("emits no sample for a LIN Move whose target merges with the join", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),
+      point({ target: vec3(10.5, 0, 0), feed: 15, motionType: "LIN" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    expect(path.samples).toHaveLength(21);
+    expect(path.totalLengthMm).toBeCloseTo(10, 10);
+  });
+
+  it("keeps the start pose when a merging LIN Move is the first Segment", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      point({ target: vec3(0.5, 0, 0), feed: 15, motionType: "LIN" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    expect(path.samples).toHaveLength(1);
+    expect(path.samples[0]?.position).toEqual(vec3(0.5, 0, 0));
+    expect(path.totalLengthMm).toBe(0);
+  });
+
+  it("counts a LIN Move away from Home in full, starting at the Home pose", () => {
+    // A LIN Move always starts where the chain is: the first sample is
+    // the Home pose itself, then the drawn line to the target.
+    const traj = trajectory(vec3(5, 0, 0), [
+      point({ target: vec3(15, 0, 0), feed: 15, motionType: "LIN" }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    expect(path.samples).toHaveLength(21);
+    expect(path.samples[0]?.position).toEqual(vec3(5, 0, 0));
+    expect(path.samples[0]?.pathLengthMm).toBe(0);
     expect(path.totalLengthMm).toBeCloseTo(10, 10);
   });
 });
@@ -330,6 +423,7 @@ describe("non-finite geometry defense", () => {
       kind: "point",
       target: vec3(Number.NaN, 0, 0),
       feed: 20,
+      motionType: "PTP",
     };
     expect(literalSegment(seg)).toThrow(CoreError);
   });

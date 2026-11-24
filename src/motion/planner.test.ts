@@ -250,7 +250,7 @@ describe("planner seam: segment boundaries", () => {
   it("plans a Point Segment transit with its own Feed", () => {
     const traj = trajectory(vec3(80, 0, 60), [
       line({ start: vec3(80, 0, 60), end: vec3(80, 40, 60), feed: 20 }),
-      point({ target: vec3(60, 0, 60), feed: 50 }),
+      point({ target: vec3(60, 0, 60), feed: 50, motionType: "PTP" }),
       line({ start: vec3(60, 0, 60), end: vec3(60, 40, 60), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
@@ -267,10 +267,51 @@ describe("planner seam: segment boundaries", () => {
     void tz;
   });
 
+  it("plans a LIN Move along the drawn straight line", () => {
+    // A LIN Move is discretized per-sample, so the planned TCP traces
+    // the drawn chord — unlike a PTP Move, which leaves it mid-Move.
+    const traj = trajectory(vec3(80, 0, 60), [
+      point({ target: vec3(0, 113, 60), feed: 30, motionType: "LIN" }),
+    ]);
+    const plan = planFromTrajectory(planner, model, traj);
+
+    expect(plan.ranges.map((r) => r.segmentIndex)).toEqual([0]);
+    const ax = 80;
+    const ay = 0;
+    const bx = 0;
+    const by = 113;
+    for (const row of plan.rows) {
+      const [mx, my] = model.forwardKinematics(row.q);
+      const t = ((mx - ax) * (bx - ax) + (my - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2);
+      const cx = ax + t * (bx - ax);
+      const cy = ay + t * (by - ay);
+      expect(Math.hypot(mx - cx, my - cy)).toBeLessThan(1);
+    }
+    expectWithinDynamicLimits(model, plan);
+  });
+
+  it("plans a mixed LIN/PTP chain with one range per Move", () => {
+    const traj = trajectory(vec3(80, 0, 60), [
+      point({ target: vec3(40, 40, 60), feed: 30, motionType: "LIN" }),
+      point({ target: vec3(80, 80, 60), feed: 30, motionType: "PTP" }),
+    ]);
+    const plan = planFromTrajectory(planner, model, traj);
+
+    expect(plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
+    // Time stays continuous across the Motion Type boundary.
+    for (let i = 1; i < plan.rows.length; i++) {
+      expect(plan.rows[i]!.tMs).toBe(plan.rows[i - 1]!.tMs + CONTROL_STEP_MS);
+    }
+    const [tx, ty] = model.forwardKinematics(plan.rows[plan.rows.length - 1]!.q);
+    expect(tx).toBeCloseTo(80, 6);
+    expect(ty).toBeCloseTo(80, 6);
+    expectWithinDynamicLimits(model, plan);
+  });
+
   it("plans a chain of Point Moves as joint interpolation between the endpoint solutions", () => {
     const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(0, 113, 60), feed: 30 }),
-      point({ target: vec3(80, 40, 60), feed: 30 }),
+      point({ target: vec3(0, 113, 60), feed: 30, motionType: "PTP" }),
+      point({ target: vec3(80, 40, 60), feed: 30, motionType: "PTP" }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);
 
@@ -308,7 +349,7 @@ describe("planner seam: segment boundaries", () => {
     // its run contributes no motion, and the joined next Segment starts
     // from its pose instead of crashing on a missing boundary pose.
     const traj = trajectory(vec3(80, 0, 60), [
-      point({ target: vec3(80, 0.5, 60), feed: 30 }),
+      point({ target: vec3(80, 0.5, 60), feed: 30, motionType: "PTP" }),
       line({ start: vec3(80, 0.5, 60), end: vec3(80, 40, 60), feed: 20 }),
     ]);
     const plan = planFromTrajectory(planner, model, traj);

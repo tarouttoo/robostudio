@@ -7,9 +7,11 @@
  *
  * A point maps its `IKResult` onto a three-valued status; a Segment is
  * sampled along its geometry (endpoints included) so a violation is
- * caught where it happens along the path, not only at its ends. A PTP
- * Move (a chained Point Segment) is exempt: only its target is checked,
- * because only arrival there is guaranteed.
+ * caught where it happens along the path, not only at its ends. A
+ * Point Move is checked by its Motion Type (ADR 0017): a PTP Move is
+ * exempt from path checks — only its target is checked, because only
+ * arrival there is guaranteed — while a LIN Move is sampled along the
+ * drawn straight line like any drawn geometry.
  */
 
 import {
@@ -88,34 +90,63 @@ export function checkPointViolation(model: RobotModel, p: Vec3): ReachabilityVio
 
 /**
  * Checks a Segment: samples its geometry at {@link SEGMENT_SAMPLE_STEP_MM}
- * spacing (endpoints included; a Point Segment by its target alone — a
- * PTP Move guarantees only arrival) and returns the first violation, or
- * null when the whole Segment admits joint angles within limits.
+ * spacing (endpoints included) and returns the first violation, or null
+ * when the whole Segment admits joint angles within limits.
+ *
+ * A Point Move is checked by its Motion Type (ADR 0017): a PTP Move at
+ * its target alone — only arrival is guaranteed; a LIN Move along the
+ * drawn straight line, which starts at `moveStart` (the previous
+ * Segment's end, the Home Point first). Without a `moveStart` a Point
+ * Move can only be checked at its target, so a LIN Move degrades to
+ * that target check — callers that know the chain always pass it.
  */
 export function checkSegmentReachability(
   model: RobotModel,
   segment: Segment,
+  moveStart?: CoreVec3,
 ): ReachabilityViolation | null {
-  for (const p of segmentSamples(segment)) {
+  for (const p of segmentSamples(segment, moveStart)) {
     const violation = checkPointViolation(model, [p.x, p.y, p.z]);
     if (violation !== null) return violation;
   }
   return null;
 }
 
-/** Samples a Segment along its geometry, endpoints included. */
-function segmentSamples(segment: Segment): readonly CoreVec3[] {
-  if (segment.kind === "point") return [segment.target];
+/**
+ * Samples a Segment along its geometry, endpoints included; a Point
+ * Move by its Motion Type (see {@link checkSegmentReachability}).
+ */
+function segmentSamples(segment: Segment, moveStart?: CoreVec3): readonly CoreVec3[] {
+  if (segment.kind === "point") {
+    if (segment.motionType === "LIN" && moveStart !== undefined) {
+      return straightLineSamples(moveStart, segment.target);
+    }
+    return [segment.target];
+  }
   const ends = segmentEnds(segment);
-  const lengthMm =
-    segment.kind === "line" ? distance(ends.start, ends.end) : arcLengthMm(segment);
+  return segment.kind === "line"
+    ? straightLineSamples(ends.start, ends.end)
+    : arcSamples(segment);
+}
+
+/** Samples the straight line between two points at the Segment step. */
+function straightLineSamples(from: CoreVec3, to: CoreVec3): readonly CoreVec3[] {
+  const lengthMm = distance(from, to);
   const steps = Math.max(1, Math.ceil(lengthMm / SEGMENT_SAMPLE_STEP_MM));
   const samples: CoreVec3[] = [];
   for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    samples.push(
-      segment.kind === "line" ? lerp(ends.start, ends.end, t) : arcPointAt(segment, t),
-    );
+    samples.push(lerp(from, to, i / steps));
+  }
+  return samples;
+}
+
+/** Samples an Arc along its geometry, endpoints included. */
+function arcSamples(segment: Segment & { readonly kind: "arc" }): readonly CoreVec3[] {
+  const lengthMm = arcLengthMm(segment);
+  const steps = Math.max(1, Math.ceil(lengthMm / SEGMENT_SAMPLE_STEP_MM));
+  const samples: CoreVec3[] = [];
+  for (let i = 0; i <= steps; i++) {
+    samples.push(arcPointAt(segment, i / steps));
   }
   return samples;
 }

@@ -34,12 +34,13 @@ function drawArc(state: EditorState, u1: number, v1: number, u2: number, v2: num
 }
 
 describe("editor state", () => {
-  it("starts on the XY plane at fixed 0 with a default feed, the default Home Point, the chained Point tool, and no Segments", () => {
+  it("starts on the XY plane at fixed 0 with a default feed, the default Motion Type LIN, the default Home Point, the chained Point tool, and no Segments", () => {
     expect(initialEditorState).toEqual({
       plane: "XY",
       fixedMm: 0,
       feedMmMin: DEFAULT_FEED_MM_MIN,
       tool: "point",
+      motionType: "LIN",
       arcMode: "radius",
       arcDirection: "CCW",
       arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
@@ -183,7 +184,7 @@ describe("editor state", () => {
     expect(toHome.draftStart).toBeNull();
   });
 
-  it("Point tool commits a Point Segment with one click: a PTP Move to the target without drawn geometry", () => {
+  it("Point tool commits a Point Segment with one click: a Move to the target without drawn geometry", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "point" });
     state = click(state, 3.25, -1.5);
     expect(state.segments).toHaveLength(1);
@@ -192,8 +193,45 @@ describe("editor state", () => {
     if (seg.kind !== "point") return;
     expect(seg.target).toEqual({ x: 3.25, y: -1.5, z: 0 });
     expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+    // The default Motion Type is LIN: the Move follows the drawn line.
+    expect(seg.motionType).toBe("LIN");
     // A Point has no draft: the next click places the next Point in the chain.
     expect(state.draftStart).toBeNull();
+  });
+
+  it("commits PTP Moves while the Motion Type toggle is PTP, and keeps editing the next Move", () => {
+    const ptp = editorReducer(initialEditorState, { type: "setMotionType", motionType: "PTP" });
+    const placed = click(ptp, 5, 6);
+    const seg = placed.segments[0]!;
+    expect(seg.kind === "point" && seg.motionType).toBe("PTP");
+    // The toggle stays for the next Move.
+    const second = click(placed, 7, 8);
+    expect(second.segments[1]!.kind === "point" && second.segments[1]!.motionType).toBe("PTP");
+    // Switching back to LIN: only future Moves change.
+    const back = editorReducer(second, { type: "setMotionType", motionType: "LIN" });
+    expect(back.segments[0]!.kind === "point" && back.segments[0]!.motionType).toBe("PTP");
+    const third = click(back, 9, 10);
+    expect(third.segments[2]!.kind === "point" && third.segments[2]!.motionType).toBe("LIN");
+  });
+
+  it("edits a committed Move's Motion Type in place, like its Feed", () => {
+    const lin = click(initialEditorState, 1, 2);
+    const ptp = click({ ...lin, motionType: "PTP" }, 3, 4);
+    const edited = editorReducer(ptp, { type: "setSegmentMotionType", index: 0, motionType: "PTP" });
+    const first = edited.segments[0]!;
+    expect(first.kind === "point" && first.motionType).toBe("PTP");
+    if (first.kind !== "point") return;
+    // Geometry and target stay untouched; the second Move is unaffected.
+    expect(first.target).toEqual({ x: 1, y: 2, z: 0 });
+    expect(edited.segments[1]!.kind === "point" && edited.segments[1]!.motionType).toBe("PTP");
+    const back = editorReducer(edited, { type: "setSegmentMotionType", index: 0, motionType: "LIN" });
+    expect(back.segments[0]!.kind === "point" && back.segments[0]!.motionType).toBe("LIN");
+  });
+
+  it("ignores a Motion Type edit for an unknown Segment index", () => {
+    const state = placePoint(initialEditorState, 0, 0);
+    expect(editorReducer(state, { type: "setSegmentMotionType", index: 5, motionType: "PTP" })).toBe(state);
+    expect(editorReducer(state, { type: "setSegmentMotionType", index: -1, motionType: "PTP" })).toBe(state);
   });
 
   it("Point tool places the target on the current plane's fixed coordinate", () => {
@@ -452,12 +490,16 @@ describe("editor state", () => {
   });
 
   it("draftPreviewOf describes the pending draft for the canvas view", () => {
-    // The Point tool previews the pending Move: dashed from the chain
-    // end, the Home Point before the first Segment, to the cursor.
-    expect(draftPreviewOf(initialEditorState)).toEqual({ kind: "ptp", start: vec2(213, 0) });
+    // The Point tool previews the pending Move, carrying its Motion
+    // Type, from the chain end — the Home Point before the first
+    // Segment — to the cursor. The default is LIN.
+    expect(draftPreviewOf(initialEditorState)).toEqual({ kind: "move", motionType: "LIN", start: vec2(213, 0) });
     // After placed Points the preview chains from the last target.
     const chained = placePoint(placePoint(initialEditorState, 0, 0), 10, 4);
-    expect(draftPreviewOf(chained)).toEqual({ kind: "ptp", start: vec2(10, 4) });
+    expect(draftPreviewOf(chained)).toEqual({ kind: "move", motionType: "LIN", start: vec2(10, 4) });
+    // A PTP toggle shows in the preview.
+    const ptp = editorReducer(chained, { type: "setMotionType", motionType: "PTP" });
+    expect(draftPreviewOf(ptp)).toEqual({ kind: "move", motionType: "PTP", start: vec2(10, 4) });
     // No Home Point and nothing drawn: no Move to preview.
     expect(draftPreviewOf({ ...initialEditorState, home: null })).toBeNull();
     // A pending radius-mode Arc draft carries radius and direction.
@@ -486,7 +528,7 @@ describe("editor state", () => {
     const chaining = editorReducer(drawn, { type: "setTool", tool: "point" });
     const preview = draftPreviewOf(chaining);
     expect(preview).not.toBeNull();
-    if (preview === null || preview.kind !== "ptp") return;
+    if (preview === null || preview.kind !== "move") return;
     expect(preview.start).toEqual(vec2(8, 0));
   });
 
@@ -554,7 +596,7 @@ describe("Project File content", () => {
     return {
       view: { plane: "XZ", fixedMm: 4, feedMmMin: 600 },
       home: vec3(1, 4, 2),
-      segments: [corePoint({ target: vec3(10, 4, 0), feed: 10 })],
+      segments: [corePoint({ target: vec3(10, 4, 0), feed: 10, motionType: "LIN" })],
     };
   }
 
@@ -588,5 +630,23 @@ describe("Project File content", () => {
     });
     expect(restored.segments).toEqual([]);
     expect(restored.home).toBeNull();
+  });
+
+  it("loadProject restores each Move's Motion Type", () => {
+    const restored = editorReducer(initialEditorState, {
+      type: "loadProject",
+      content: {
+        view: { plane: "XY", fixedMm: 0, feedMmMin: 1200 },
+        home: vec3(0, 0, 0),
+        segments: [
+          corePoint({ target: vec3(10, 0, 0), feed: 10, motionType: "LIN" }),
+          corePoint({ target: vec3(20, 0, 0), feed: 10, motionType: "PTP" }),
+        ],
+      },
+    });
+    expect(restored.segments.map((s) => (s.kind === "point" ? s.motionType : null))).toEqual([
+      "LIN",
+      "PTP",
+    ]);
   });
 });

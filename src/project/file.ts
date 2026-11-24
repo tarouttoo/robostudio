@@ -2,8 +2,8 @@
  * The versioned Project File (Файл проекта): JSON with a `schemaVersion`
  * storing the view settings (Working Plane with its fixed coordinate and
  * the default Feed in mm/min), the Home Point, and the canonical
- * Segments with their Feeds — the canonical save/load format
- * (GLOSSARY.md, Spec #1 decision 31).
+ * Segments with their Feeds and Motion Types — the canonical save/load
+ * format (GLOSSARY.md, Spec #1 decision 31).
  *
  * Serialization is plain, hand-inspectable JSON in internal units
  * (millimetres, mm/s, radians). Parsing rebuilds every Segment through
@@ -21,6 +21,7 @@ import {
   line,
   point,
   type ArcDirection,
+  type MotionType,
   type Segment,
   type Vec3,
   type WorkingPlane,
@@ -57,7 +58,8 @@ export interface ProjectContent {
   readonly view: ProjectView;
   /** The Home Point, or null while unset. */
   readonly home: Vec3 | null;
-  /** Canonical Segments in draw order, each with its Feed (mm/s). */
+  /** Canonical Segments in draw order, each with its Feed (mm/s) and
+   * Motion Type. */
   readonly segments: readonly Segment[];
 }
 
@@ -68,10 +70,15 @@ interface PointJson {
   readonly z: number;
 }
 
-/** JSON shape of one Segment: the geometric definition + Feed. */
+/** JSON shape of one Segment: the geometric definition + Feed + Motion Type. */
 type SegmentJson =
   | { readonly kind: "line"; readonly start: PointJson; readonly end: PointJson; readonly feed: number }
-  | { readonly kind: "point"; readonly target: PointJson; readonly feed: number }
+  | {
+      readonly kind: "point";
+      readonly target: PointJson;
+      readonly feed: number;
+      readonly motionType: MotionType;
+    }
   | {
       readonly kind: "arc";
       readonly plane: WorkingPlane;
@@ -101,7 +108,12 @@ function segmentToJson(segment: Segment): SegmentJson {
         feed: segment.feed,
       };
     case "point":
-      return { kind: "point", target: { ...segment.target }, feed: segment.feed };
+      return {
+        kind: "point",
+        target: { ...segment.target },
+        feed: segment.feed,
+        motionType: segment.motionType,
+      };
     case "arc":
       // Only the geometric definition is stored: radius and sweep derive
       // from the center at parse time, so a stored file cannot disagree
@@ -247,7 +259,14 @@ function requireSegment(value: unknown, where: string): Segment {
         feed: requireFeed(value, "feed", where),
       });
     case "point":
-      return point({ target: requirePoint(value, "target", where), feed: requireFeed(value, "feed", where) });
+      return point({
+        target: requirePoint(value, "target", where),
+        feed: requireFeed(value, "feed", where),
+        // Files written before the Motion Type existed hold chained PTP
+        // Moves (ADR 0016): a missing field keeps that semantics instead
+        // of silently turning saved jumps into drawn lines (ADR 0017).
+        motionType: requireMotionType(value, where),
+      });
     case "arc":
       return arcFromCenter({
         plane: requirePlane(value, where),
@@ -284,6 +303,23 @@ function requireDirection(record: Record<string, unknown>, where: string): ArcDi
     throw new ProjectError(
       "InvalidProjectFile",
       `${where}: "direction" must be "CW" or "CCW", got ${JSON.stringify(value)}`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Reads a Point Move's Motion Type: "LIN" or "PTP"; a missing field is
+ * the legacy pre-Motion-Type PTP semantics (ADR 0017), anything else is
+ * a named error.
+ */
+function requireMotionType(record: Record<string, unknown>, where: string): MotionType {
+  const value = record["motionType"];
+  if (value === undefined) return "PTP";
+  if (value !== "LIN" && value !== "PTP") {
+    throw new ProjectError(
+      "InvalidProjectFile",
+      `${where}: "motionType" must be "LIN" or "PTP", got ${JSON.stringify(value)}`,
     );
   }
   return value;

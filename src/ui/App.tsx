@@ -1,6 +1,6 @@
 import { useMemo, useReducer, useState, type JSX } from "react";
 
-import { line, planePoint, type Segment, type Vec2, type Vec3 } from "../core";
+import { line, planePoint, segmentEnds, type Segment, type Vec2, type Vec3 } from "../core";
 import { serializeProject } from "../project";
 import { APP_NAME, APP_VERSION } from "../core/version";
 import { bridge } from "./bridge";
@@ -40,6 +40,7 @@ import {
   type ArcDirection,
   type EditorState,
   type EditorTool,
+  type MotionType,
 } from "./editor";
 
 /**
@@ -53,11 +54,14 @@ const generationSession = createGenerationSession(MIKO_MINI);
 /**
  * The trajectory editor: the operator picks the Working Plane with its
  * fixed coordinate, places a chain of Point Segments — one click per
- * PTP Move, chaining from the previous Segment's end (the first from
- * the Home Point) — draws Arcs (R or center, CW/CCW), sets the Home
- * Point, edits per-Segment Feeds, and can undo or clear. Impossible
- * Arcs are rejected at draw time with a readable message; Reachability
- * of a pending Move is checked at its target only. Drawn geometry is
+ * Move, chaining from the previous Segment's end (the first from
+ * the Home Point) — chooses the Motion Type the next Move travels by
+ * (LIN по прямой, the default, or PTP в точку), edits each committed
+ * Move's Motion Type and Feed in the segment list, draws Arcs (R or
+ * center, CW/CCW), sets the Home Point, and can undo or clear.
+ * Impossible Arcs are rejected at draw time with a readable message;
+ * Reachability of a pending Move is checked by its Motion Type — LIN
+ * along the drawn line, PTP at its target only. Drawn geometry is
  * held as canonical Segments in the editor state (see `editor.ts`); the
  * canvas is a pure view over that state (ADR 0005, ADR 0007). On
  * «Сгенерировать» the drawn Trajectory runs through the
@@ -148,28 +152,44 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
     () => createReachabilitySampler(MIKO_MINI, state.plane, state.fixedMm),
     [state.plane, state.fixedMm],
   );
-  // One check per committed Segment, aligned with the draw order.
+  // One check per committed Segment, aligned with the draw order. A
+  // Point Move is checked by its Motion Type: PTP at its target only,
+  // LIN along the drawn straight line from where the chain stands — the
+  // previous Segment's end, the Home Point first.
   const violations = useMemo<readonly (ReachabilityViolation | null)[]>(
-    () => state.segments.map((segment) => checkSegmentReachability(MIKO_MINI, segment)),
-    [state.segments],
+    () =>
+      state.segments.map((segment, i) => {
+        const previous = state.segments[i - 1];
+        const moveStart = i === 0 ? state.home : previous !== undefined ? segmentEnds(previous).end : null;
+        return checkSegmentReachability(MIKO_MINI, segment, moveStart ?? undefined);
+      }),
+    [state.segments, state.home],
   );
   const homeStatus = useMemo<PointReachability | null>(
     () => (state.home === null ? null : checkPointReachability(MIKO_MINI, [state.home.x, state.home.y, state.home.z])),
     [state.home],
   );
   // The pending draft is checked before the operator commits: an Arc
-  // draft along its approximate path, the Point tool's pending PTP Move
-  // at its target only — arrival is all a PTP Move guarantees.
+  // draft along its approximate path; the Point tool's pending Move by
+  // its Motion Type — a PTP Move at its target only (arrival is all it
+  // guarantees), a LIN Move along the drawn straight line it would
+  // follow.
   const draftViolation = useMemo<ReachabilityViolation | null>(() => {
     if (cursor === null) return null;
     const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
     if (state.tool === "point") {
-      return checkPointViolation(MIKO_MINI, [end.x, end.y, end.z]);
+      if (state.motionType === "PTP") {
+        return checkPointViolation(MIKO_MINI, [end.x, end.y, end.z]);
+      }
+      const draft = draftPreviewOf(state);
+      if (draft === null || draft.kind !== "move") return null;
+      const start = planePoint(state.plane, draft.start.x, draft.start.y, state.fixedMm);
+      return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
     }
     if (state.draftStart === null) return null;
     const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
     return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
-  }, [state.tool, state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
+  }, [state, cursor]);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -241,6 +261,23 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 <span style={{ color: "#888" }}>({hint})</span>
               </label>
             ))}
+            {state.tool === "point" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", paddingLeft: "1.5rem" }}>
+                <span style={{ fontSize: "0.8rem", color: "#555" }}>Тип перемещения</span>
+                {(["LIN", "PTP"] as const).map((motionType) => (
+                  <label key={motionType} style={rowStyle}>
+                    <input
+                      type="radio"
+                      name="motionType"
+                      value={motionType}
+                      checked={state.motionType === motionType}
+                      onChange={() => dispatch({ type: "setMotionType", motionType })}
+                    />
+                    {motionTypeLabel(motionType)}
+                  </label>
+                ))}
+              </div>
+            )}
             {state.tool === "arc" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", paddingLeft: "1.5rem" }}>
                 <label style={rowStyle}>
@@ -435,6 +472,33 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                     {segmentLabel(segment)}
                     {violation !== null && (
                       <div style={{ color: VIOLATION_COLOR }}>{violationLabel(violation)}</div>
+                    )}
+                    {segment.kind === "point" && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: "0.5rem",
+                          fontFamily: "system-ui, sans-serif",
+                          marginTop: "0.15rem",
+                        }}
+                      >
+                        Тип перемещения:{" "}
+                        {(["LIN", "PTP"] as const).map((motionType) => (
+                          <label key={motionType} style={rowStyle}>
+                            <input
+                              type="radio"
+                              name={`motionType-${i}`}
+                              value={motionType}
+                              checked={segment.motionType === motionType}
+                              onChange={() =>
+                                dispatch({ type: "setSegmentMotionType", index: i, motionType })
+                              }
+                            />
+                            {motionTypeLabel(motionType)}
+                          </label>
+                        ))}
+                      </div>
                     )}
                     <label style={{ ...rowStyle, fontFamily: "system-ui, sans-serif", marginTop: "0.15rem" }}>
                       Подача, мм/мин{" "}
@@ -654,6 +718,11 @@ function segmentLabel(segment: Segment): string {
     case "arc":
       return `Дуга (${formatVec3(segment.start)}) → (${formatVec3(segment.end)}), R ${segment.radiusMm.toFixed(1)}, ${mmSToMmMin(segment.feed).toFixed(0)} мм/мин`;
     case "point":
-      return `Точка (${formatVec3(segment.target)}), ${mmSToMmMin(segment.feed).toFixed(0)} мм/мин`;
+      return `Точка (${formatVec3(segment.target)}), ${motionTypeLabel(segment.motionType)}, ${mmSToMmMin(segment.feed).toFixed(0)} мм/мин`;
   }
+}
+
+/** The Russian UI label of a Motion Type (GLOSSARY.md): LIN по прямой, PTP в точку. */
+function motionTypeLabel(motionType: MotionType): string {
+  return motionType === "LIN" ? "LIN — по прямой" : "PTP — в точку";
 }
