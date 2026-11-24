@@ -15,7 +15,6 @@ import { parseNativeIssues } from "../convert/blockers";
 import {
   decideWave,
   integrationBranch,
-  notesBranch,
   type WaveDecision,
   type WaveTicket,
 } from "./wave";
@@ -47,7 +46,6 @@ if (!Number.isInteger(specNumber) || specNumber <= 0) {
   fail(`Invalid spec number: ${SPEC_NUMBER}`);
 }
 const integration = integrationBranch(specNumber);
-const notes = notesBranch(specNumber);
 
 const ghWith = (args: string[], token: string): string =>
   execFileSync("gh", args, {
@@ -232,7 +230,6 @@ try {
       SPEC_NUMBER: String(specNumber),
       INTEGRATION_BRANCH: integration,
       INTEGRATION_STATE_LINE: stateLine,
-      NOTES_BRANCH: notes,
       TICKETS_CONTEXT: ticketContext(decision.tickets),
     });
     sh(`git push origin ${integration}`);
