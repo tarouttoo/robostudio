@@ -59,7 +59,7 @@ function mikoChainJoints(): ChainJointConfig[] {
  * only — so the cross-check pairs the chain against the toolless
  * variant of the same measured links.
  */
-export function mikoShapedAnalyticConfig(): MiKoMiniRobotConfig {
+function mikoShapedAnalyticConfig(): MiKoMiniRobotConfig {
   return {
     ...DEFAULT_MIKO_MINI_CONFIG,
     geometry: { baseHeightMm: 160, upperArmMm: 159.8045, forearmMm: 159.8045, toolOffsetMm: 0 },
