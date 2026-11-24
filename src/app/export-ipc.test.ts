@@ -7,7 +7,7 @@ import { FIXTURE_TRAJECTORY } from "../export/golden/fixture";
 import { runPipeline } from "../export";
 import { DEFAULT_MIKO_MINI_CONFIG, createMiKoMiniModel } from "../kinematics/miko-mini";
 import type { RobotModel } from "../kinematics/robot-model";
-import { createPchipPlanner } from "../motion";
+import { createSplinePlanner } from "../motion";
 import { exportCsvs, MOTION_GIF_FILE, ROBOT_CSV_FILE, RVIZ_CSV_FILE, type ExportDialogs } from "./export-ipc";
 import type { ExportCsvsResult as RendererExportCsvsResult } from "../ui/bridge";
 
@@ -47,13 +47,13 @@ describe("export IPC handlers", () => {
     // a second, fresh run must reproduce them exactly (deterministic
     // pipeline), and the files on disk must match both (verbatim write).
     // The GIF is binary and must survive as bytes, not as UTF-8 text.
-    const first = runPipeline({ trajectory: FIXTURE_TRAJECTORY, model, planner: createPchipPlanner(model) });
+    const first = runPipeline({ trajectory: FIXTURE_TRAJECTORY, model, planner: createSplinePlanner(model) });
     const result = await exportCsvs(fakeDialogs(dir), first.robotCsv, first.rvizCsv, first.motionGif);
     if (result.kind !== "exported") throw new Error(`expected exported, got ${result.kind}`);
     expect(result.folder).toBe(dir);
     expect(result.files).toEqual([join(dir, ROBOT_CSV_FILE), join(dir, RVIZ_CSV_FILE), join(dir, MOTION_GIF_FILE)]);
 
-    const second = runPipeline({ trajectory: FIXTURE_TRAJECTORY, model, planner: createPchipPlanner(model) });
+    const second = runPipeline({ trajectory: FIXTURE_TRAJECTORY, model, planner: createSplinePlanner(model) });
     expect(second.robotCsv).toBe(first.robotCsv);
     expect(second.rvizCsv).toBe(first.rvizCsv);
     expect(second.motionGif).toEqual(first.motionGif);

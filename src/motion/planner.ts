@@ -1,10 +1,12 @@
 /**
  * The Planner seam (ADR 0004): a discretized path plus per-sample joint
  * solutions in, a time-parameterized Motion Plan out. The v1 planner —
- * `createPchipPlanner` — interpolates joint angles along path length
- * per Segment with PCHIP, follows a quintic smoothstep S-curve Motion
- * Profile, and iteratively scales each Segment's traverse time until
- * the Robot Model's velocity, acceleration, and jerk limits hold.
+ * `createSplinePlanner` — interpolates joint angles along path length
+ * per Segment with a C³ quintic spline (ADR 0022), follows a quintic
+ * smoothstep S-curve Motion Profile, and iteratively scales each
+ * Segment's traverse time until the Robot Model's velocity,
+ * acceleration, and jerk limits hold — probed at the control rows, the
+ * Segment's endpoints, and every knot crossing.
  *
  * Plan contract (the pipeline's Validation stages, GLOSSARY.md):
  *
@@ -12,12 +14,21 @@
  *   strictly increasing, from 0 to the grid-rounded total duration.
  * - Motion is continuous: every Segment starts exactly where the
  *   previous one ended (merged joins contribute no duplicate motion),
- *   and the S-curve has zero velocity and acceleration at boundaries.
+ *   the S-curve has zero velocity and acceleration at boundaries, and
+ *   the spline keeps velocity, acceleration, and jerk continuous
+ *   across every knot (C³, ADR 0022).
+ * - Joint positions stay within the Robot Model's position limits and
+ *   the dynamic limits hold not only at the rows but between them:
+ *   every plan is verified at the control rows, the Segment endpoints,
+ *   and every knot crossing before it leaves the Planner.
  * - Ranges are split by Segment and Feed: each planned Segment gets one
  *   time range whose length the Feed sets (mean tangential speed =
  *   Feed), stretched by time scaling until the dynamic limits hold and
  *   floored at one control step, so every range owns at least one row
  *   and no planned Segment's motion can drop off the grid.
+ * - Total duration is capped: a plan past 15 minutes fails with a named
+ *   `PlanDurationExceeded` (ADR 0021) instead of delivering hours of
+ *   unusable motion that downstream renderers would choke on.
  * - Input or output that cannot satisfy the contract fails with a
  *   named `MotionError`.
  */
@@ -26,8 +37,8 @@ import type { DiscretizedPath } from "../core/discretize";
 import type { Feed } from "../core/trajectory";
 import type { JointAngles, JointConfig, RobotModel } from "../kinematics/robot-model";
 import { MotionError } from "./errors";
-import { pchip, type Pchip } from "./pchip";
 import { sCurveAt } from "./profile";
+import { quinticSpline, type QuinticSpline } from "./spline";
 
 /** Control step of the plan's time grid, in milliseconds (ADR 0006). */
 export const CONTROL_STEP_MS = 20;
@@ -39,6 +50,16 @@ const TIME_SCALE_SAFETY = 1.02;
 const MAX_SCALE_ITERATIONS = 64;
 
 /**
+ * Total-plan duration cap. An operator's own Feed choice and the
+ * dynamic limits may legitimately demand slow motion, but a plan past
+ * this cap signals a pathological trajectory (e.g. a fake base
+ * revolution from an ±π branch cut in the joint solutions) rather than
+ * slow progress — it fails loudly instead of freezing the downstream
+ * renderers on hours of rows (ADR 0021).
+ */
+const MAX_PLAN_DURATION_MS = 15 * 60 * 1000;
+
+/**
  * Scaling budget: a Segment stretched beyond this multiple of its
  * Feed-nominal duration signals unusable dynamic limits (zero or
  * vanishing) rather than slow motion, and fails loudly before the grid
@@ -48,6 +69,14 @@ const MAX_TIME_SCALEUP = 10_000;
 
 /** Slack on limit comparisons, absorbing roundoff in the limit check. */
 const LIMIT_SLACK = 1e-9;
+
+/**
+ * Slack on the cyclic-joint span test: a joint whose limits cover a
+ * full circle minus this slack is cyclic — its (unwrapped) plan values
+ * may numerically leave the stored range while naming the same physical
+ * pose, so position checks compare its wrapped representative (ADR 0021).
+ */
+const CYCLE_SPAN_SLACK = 1e-9;
 
 /** One row of the Motion Plan: the joint state at one control moment. */
 export interface MotionRow {
@@ -127,8 +156,10 @@ interface SegmentPlan {
   /** Path-length window [sStart, sEnd] the Segment's motion spans, mm. */
   readonly sStart: number;
   readonly sEnd: number;
-  /** PCHIP interpolant per joint over the Segment's knots. */
-  readonly interpolants: readonly Pchip[];
+  /** C³ quintic spline interpolant per joint over the Segment's knots. */
+  readonly interpolants: readonly QuinticSpline[];
+  /** Normalized profile times of the Segment's interior knot crossings. */
+  readonly knotTaus: readonly number[];
   /** Per-joint dynamic limits of the Robot Model. */
   readonly limits: readonly JointConfig[];
 }
@@ -141,10 +172,11 @@ interface ScaledSegment {
 }
 
 /**
- * The v1 Planner: per-Segment PCHIP q(s) + quintic smoothstep S-curve
- * profile + iterative time scaling against the Robot Model's limits.
+ * The v1 Planner: per-Segment C³ quintic-spline q(s) + quintic
+ * smoothstep S-curve profile + iterative time scaling against the
+ * Robot Model's limits (ADR 0022).
  */
-export function createPchipPlanner(model: RobotModel): Planner {
+export function createSplinePlanner(model: RobotModel): Planner {
   const jointCount = model.joints.length;
 
   const plan = (input: PlannerInput): MotionPlan => {
@@ -163,6 +195,13 @@ export function createPchipPlanner(model: RobotModel): Planner {
     }
 
     const totalMs = tStartMs;
+    if (totalMs > MAX_PLAN_DURATION_MS) {
+      const worst = scaled.reduce((a, b) => (stretchOf(b) > stretchOf(a) ? b : a));
+      throw new MotionError(
+        "PlanDurationExceeded",
+        `the plan would run ${(totalMs / 60000).toFixed(1)} minutes, past the ${MAX_PLAN_DURATION_MS / 60000}-minute cap — segment ${worst.seg.segmentIndex} stretches ${stretchOf(worst).toFixed(0)}× past its Feed-nominal time: check the trajectory near singular stretches and the Robot Model's dynamic limits`,
+      );
+    }
     const ranges: PlanSegmentRange[] = scaled.map(({ seg, tStartMs: start, durationMs }) => ({
       segmentIndex: seg.segmentIndex,
       feed: seg.feed,
@@ -171,7 +210,7 @@ export function createPchipPlanner(model: RobotModel): Planner {
     }));
 
     const rows = emitRows(scaled, totalMs, jointCount);
-    verifyPlan(model, ranges, rows);
+    verifyPlan(model, scaled, ranges, rows);
 
     return {
       rows,
@@ -213,9 +252,9 @@ function validateInput(input: PlannerInput, jointCount: number): void {
 }
 
 /**
- * Groups the samples into per-Segment runs and builds each run's PCHIP
- * interpolants over path length. The run's s-window starts where the
- * previous planned Segment ended, so a merged join (the next
+ * Groups the samples into per-Segment runs and builds each run's C³
+ * quintic-spline interpolants over path length. The run's s-window
+ * starts where the previous planned Segment ended, so a merged join (the next
  * Segment's start sample dropped by the Discretization) is bridged by
  * prepending the shared boundary pose: duplicates produce no motion.
  * Runs without a path-length span (zero-length Segments merged away)
@@ -251,11 +290,20 @@ function collectSegmentPlans(input: PlannerInput, model: RobotModel): SegmentPla
       for (let k = 0; k < runLength; k++) {
         knots.push({ s: samples[i + k]!.pathLengthMm, q: input.solutions[i + k] as JointAngles });
       }
-      const interpolants: Pchip[] = [];
+      const interpolants: QuinticSpline[] = [];
+      const knotSs = knots.map((knot) => knot.s);
       for (let joint = 0; joint < model.joints.length; joint++) {
-        interpolants.push(pchip(knots.map((knot) => knot.s), knots.map((knot) => knot.q[joint] as number)));
+        interpolants.push(quinticSpline(knotSs, knots.map((knot) => knot.q[joint] as number)));
       }
-      segments.push({ segmentIndex: segIndex, feed, sStart, sEnd, interpolants, limits: model.joints });
+      segments.push({
+        segmentIndex: segIndex,
+        feed,
+        sStart,
+        sEnd,
+        interpolants,
+        knotTaus: knotCrossingTaus(knotSs, sStart, sEnd),
+        limits: model.joints,
+      });
       boundaryQ = knots[knots.length - 1]!.q;
       sStart = sEnd;
     } else {
@@ -268,15 +316,22 @@ function collectSegmentPlans(input: PlannerInput, model: RobotModel): SegmentPla
   return segments;
 }
 
+/** A scaled Segment's duration as a multiple of its Feed-nominal time. */
+function stretchOf(scaled: ScaledSegment): number {
+  const nominalMs = Math.max(1, ((scaled.seg.sEnd - scaled.seg.sStart) / scaled.seg.feed) * 1000);
+  return scaled.durationMs / nominalMs;
+}
+
 /**
  * Iteratively stretches the Segment's duration until velocity,
- * acceleration, and jerk at the grid rows and the Segment's endpoints
- * respect every joint's dynamic limits. The nominal duration follows
- * the Feed (mean tangential speed = Feed), floored at one control
- * step: a Segment finishing inside a single grid gap would own no row
- * and its motion would vanish from the plan. Each round grows the
- * duration by the worst required factor — velocity scales as 1/T,
- * acceleration as 1/T², jerk as 1/T³ — plus a small safety margin.
+ * acceleration, and jerk at every probe time — the control rows, the
+ * Segment's endpoints, and every knot crossing — respect every joint's
+ * dynamic limits. The nominal duration follows the Feed (mean
+ * tangential speed = Feed), floored at one control step: a Segment
+ * finishing inside a single grid gap would own no row and its motion
+ * would vanish from the plan. Each round grows the duration by the
+ * worst required factor — velocity scales as 1/T, acceleration as 1/T²,
+ * jerk as 1/T³ — plus a small safety margin.
  */
 function scaleSegmentDuration(seg: SegmentPlan, tStartMs: number): number {
   const lengthMm = seg.sEnd - seg.sStart;
@@ -284,14 +339,11 @@ function scaleSegmentDuration(seg: SegmentPlan, tStartMs: number): number {
   let durationMs = Math.max(nominalMs, CONTROL_STEP_MS);
   for (let iteration = 0; iteration < MAX_SCALE_ITERATIONS; iteration++) {
     let needed = 1;
-    for (const tau of scaleSampleTaus(tStartMs, durationMs)) {
+    for (const tau of probeTaus(seg, tStartMs, durationMs)) {
       const profile = sCurveAt({ lengthMm, durationS: durationMs / 1000 }, (tau * durationMs) / 1000);
       seg.interpolants.forEach((interp, joint) => {
         const limit = seg.limits[joint] as JointConfig;
-        const { dq, ddq, dddq } = interp.evalWithDerivatives(seg.sStart + profile.s);
-        const qd = dq * profile.ds;
-        const qdd = ddq * profile.ds * profile.ds + dq * profile.dds;
-        const qddd = dddq * profile.ds ** 3 + 3 * ddq * profile.ds * profile.dds + dq * profile.ddds;
+        const { qd, qdd, qddd } = jointMotionAt(interp, seg.sStart + profile.s, profile);
         needed = Math.max(
           needed,
           Math.abs(qd) / limit.maxVelocityRadS,
@@ -316,24 +368,71 @@ function scaleSegmentDuration(seg: SegmentPlan, tStartMs: number): number {
 }
 
 /**
- * The normalized times the scaling loop probes: every control-grid
- * moment inside the Segment's window plus both profile endpoints,
- * where the quintic S-curve's jerk peaks.
+ * The normalized profile times the scaling loop and the verifier both
+ * probe: both profile endpoints (where the quintic S-curve's jerk
+ * peaks), every control-grid moment inside the Segment's window, and
+ * every interior knot crossing (where the spline's derivatives move
+ * fastest). Scaling and verification share this set, so what scaling
+ * accepted is exactly what verification re-checks.
  */
-function* scaleSampleTaus(tStartMs: number, durationMs: number): Generator<number> {
+function* probeTaus(seg: SegmentPlan, tStartMs: number, durationMs: number): Generator<number> {
   yield 0;
   const tEndMs = tStartMs + durationMs;
   for (let tMs = Math.ceil(tStartMs / CONTROL_STEP_MS) * CONTROL_STEP_MS; tMs <= tEndMs; tMs += CONTROL_STEP_MS) {
     if (tMs > tStartMs) yield (tMs - tStartMs) / durationMs;
   }
+  yield* seg.knotTaus;
   yield 1;
+}
+
+/**
+ * The normalized profile times at which the Segment's path length
+ * crosses each interior knot: `sStart + length·sig(τ) = knotS` solved
+ * by bisection (the S-curve's σ is monotone non-decreasing). The taus
+ * depend only on the Segment's geometry, not its duration, so they are
+ * computed once at planning time.
+ */
+function knotCrossingTaus(knotSs: readonly number[], sStart: number, sEnd: number): number[] {
+  const lengthMm = sEnd - sStart;
+  const taus: number[] = [];
+  for (const knotS of knotSs) {
+    if (!(knotS > sStart + 1e-9 && knotS < sEnd - 1e-9)) continue;
+    let lo = 0;
+    let hi = 1;
+    for (let step = 0; step < 60; step++) {
+      const mid = (lo + hi) / 2;
+      const sigma = 6 * mid ** 5 - 15 * mid ** 4 + 10 * mid ** 3;
+      if (sStart + lengthMm * sigma < knotS) lo = mid;
+      else hi = mid;
+    }
+    taus.push((lo + hi) / 2);
+  }
+  return taus;
+}
+
+/**
+ * One probe's joint velocities, accelerations, and jerks: the spline's
+ * path-length derivatives chained with the Motion Profile's time
+ * derivatives (the Planner's single definition of joint motion).
+ */
+function jointMotionAt(
+  interp: QuinticSpline,
+  s: number,
+  profile: { readonly ds: number; readonly dds: number; readonly ddds: number },
+): { readonly qd: number; readonly qdd: number; readonly qddd: number } {
+  const { dq, ddq, dddq } = interp.evalWithDerivatives(s);
+  return {
+    qd: dq * profile.ds,
+    qdd: ddq * profile.ds * profile.ds + dq * profile.dds,
+    qddd: dddq * profile.ds ** 3 + 3 * ddq * profile.ds * profile.dds + dq * profile.ddds,
+  };
 }
 
 /**
  * Emits the plan's rows on the global control grid: row j at exactly
  * j·20 ms, owned by the last Segment whose window contains it (so a
  * boundary moment shows the Segment starting there), each Segment
- * evaluated through its S-curve and PCHIP interpolants with the
+ * evaluated through its S-curve and spline interpolants with the
  * chain-rule derivatives in time. The final row clamps to the last
  * Segment's end pose when the duration is not grid-aligned.
  */
@@ -355,11 +454,12 @@ function emitRows(scaled: readonly ScaledSegment[], totalMs: number, jointCount:
     const qdd: number[] = [];
     const qddd: number[] = [];
     for (let joint = 0; joint < jointCount; joint++) {
-      const { q: value, dq, ddq, dddq } = (seg.interpolants[joint] as Pchip).evalWithDerivatives(s);
-      q.push(value);
-      qd.push(dq * profile.ds);
-      qdd.push(ddq * profile.ds * profile.ds + dq * profile.dds);
-      qddd.push(dddq * profile.ds ** 3 + 3 * ddq * profile.ds * profile.dds + dq * profile.ddds);
+      const interp = seg.interpolants[joint] as QuinticSpline;
+      q.push(interp.evalWithDerivatives(s).q);
+      const { qd: jointQd, qdd: jointQdd, qddd: jointQddd } = jointMotionAt(interp, s, profile);
+      qd.push(jointQd);
+      qdd.push(jointQdd);
+      qddd.push(jointQddd);
     }
     rows.push({ tMs, segmentIndex: seg.segmentIndex, q, qd, qdd, qddd });
   }
@@ -368,13 +468,45 @@ function emitRows(scaled: readonly ScaledSegment[], totalMs: number, jointCount:
 
 /**
  * Validates the plan output against the contract: every range owns at
- * least one row (no Segment's motion dropped off the grid), and rows
- * on the control grid, strictly increasing, finite, and within the
- * Robot Model's dynamic limits. The stages of the pipeline validate
- * their own output (GLOSSARY.md); a defect here is a named
- * `VerificationFailed`.
+ * least one row (no Segment's motion dropped off the grid), rows sit
+ * on the control grid, strictly increasing, finite, within the Robot
+ * Model's position and dynamic limits — and the motion between rows
+ * holds those limits too, probed at the Segment endpoints and every
+ * knot crossing through the same probe set the scaling loop used
+ * (ADR 0022: the spline may overshoot between knots; a plan that
+ * exceeds any limit anywhere fails here, never in export). The stages
+ * of the pipeline validate their own output (GLOSSARY.md); a defect
+ * here is a named `VerificationFailed`.
  */
-function verifyPlan(model: RobotModel, ranges: readonly PlanSegmentRange[], rows: readonly MotionRow[]): void {
+function verifyPlan(model: RobotModel, scaled: readonly ScaledSegment[], ranges: readonly PlanSegmentRange[], rows: readonly MotionRow[]): void {
+  const cyclic = model.joints.map((joint) => joint.maxRad - joint.minRad >= 2 * Math.PI - CYCLE_SPAN_SLACK);
+  const checkPosition = (where: string, joint: number, value: number): void => {
+    const limit = model.joints[joint] as JointConfig;
+    // Cyclic joints (unwrapped across ±π, ADR 0021) name the same pose
+    // at value and value ± 2π: compare the wrapped representative.
+    const comparable = cyclic[joint]
+      ? limit.minRad + (((value - limit.minRad) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+      : value;
+    if (comparable < limit.minRad - LIMIT_SLACK || comparable > limit.maxRad + LIMIT_SLACK) {
+      throw new MotionError(
+        "VerificationFailed",
+        `${where} exceeds joint ${joint} position limits (q=${value} against [${limit.minRad}, ${limit.maxRad}])`,
+      );
+    }
+  };
+  const checkDynamic = (where: string, joint: number, limit: JointConfig, qd: number, qdd: number, qddd: number): void => {
+    if (
+      Math.abs(qd) > limit.maxVelocityRadS + LIMIT_SLACK ||
+      Math.abs(qdd) > limit.maxAccelerationRadS2 + LIMIT_SLACK ||
+      Math.abs(qddd) > limit.maxJerkRadS3 + LIMIT_SLACK
+    ) {
+      throw new MotionError(
+        "VerificationFailed",
+        `${where} exceeds joint ${joint} dynamic limits (qd=${qd}, qdd=${qdd}, qddd=${qddd})`,
+      );
+    }
+  };
+
   for (const range of ranges) {
     const ownsARow = rows.some((row) => row.tMs >= range.startMs && row.tMs < range.endMs);
     if (!ownsARow) {
@@ -397,16 +529,25 @@ function verifyPlan(model: RobotModel, ranges: readonly PlanSegmentRange[], rows
       if (![value, row.qd[joint], row.qdd[joint], row.qddd[joint]].every(Number.isFinite)) {
         throw new MotionError("VerificationFailed", `row ${i} joint ${joint} has a non-finite value`);
       }
-      if (
-        Math.abs(row.qd[joint] as number) > limit.maxVelocityRadS + LIMIT_SLACK ||
-        Math.abs(row.qdd[joint] as number) > limit.maxAccelerationRadS2 + LIMIT_SLACK ||
-        Math.abs(row.qddd[joint] as number) > limit.maxJerkRadS3 + LIMIT_SLACK
-      ) {
-        throw new MotionError(
-          "VerificationFailed",
-          `row ${i} at ${row.tMs} ms exceeds joint ${joint} dynamic limits (qd=${row.qd[joint]}, qdd=${row.qdd[joint]}, qddd=${row.qddd[joint]})`,
-        );
-      }
+      checkPosition(`row ${i} at ${row.tMs} ms`, joint, value);
+      checkDynamic(`row ${i} at ${row.tMs} ms`, joint, limit, row.qd[joint] as number, row.qdd[joint] as number, row.qddd[joint] as number);
     });
+  }
+  // Between the rows: probe every Segment's endpoints and knot crossings
+  // through the same interpolants and profile the rows were emitted from.
+  for (const { seg, tStartMs, durationMs } of scaled) {
+    const lengthMm = seg.sEnd - seg.sStart;
+    for (const tau of probeTaus(seg, tStartMs, durationMs)) {
+      const profile = sCurveAt({ lengthMm, durationS: durationMs / 1000 }, (tau * durationMs) / 1000);
+      const s = seg.sStart + profile.s;
+      const tMs = tStartMs + tau * durationMs;
+      seg.interpolants.forEach((interp, joint) => {
+        const limit = seg.limits[joint] as JointConfig;
+        const value = interp.evalWithDerivatives(s).q;
+        const { qd, qdd, qddd } = jointMotionAt(interp, s, profile);
+        checkPosition(`segment ${seg.segmentIndex} probe at ${tMs.toFixed(1)} ms`, joint, value);
+        checkDynamic(`segment ${seg.segmentIndex} probe at ${tMs.toFixed(1)} ms`, joint, limit, qd, qdd, qddd);
+      });
+    }
   }
 }

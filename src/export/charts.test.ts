@@ -11,7 +11,7 @@ import { createRobotRegistry } from "../kinematics/registry";
 import type { JointAngles, RobotModel } from "../kinematics/robot-model";
 import {
   CONTROL_STEP_MS,
-  createPchipPlanner,
+  createSplinePlanner,
   type MotionPlan,
   type MotionRow,
   type PlanSegmentRange,
@@ -206,7 +206,7 @@ function drawnLength(points: readonly (readonly [number, number])[], count: numb
 
 describe("chart seam", () => {
   const model = defaultModel();
-  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) }).plan;
 
   it("renders every chart kind from the spec, in a stable order", () => {
     expect(CHART_IDS).toEqual([
@@ -292,7 +292,7 @@ describe("chart seam", () => {
 
 describe("joint charts", () => {
   const model = defaultModel();
-  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) }).plan;
 
   /** id, title, the row field plotted, and the y-axis title with its unit. */
   const JOINT_CHARTS: readonly {
@@ -352,7 +352,7 @@ describe("joint charts", () => {
 
 describe("cartesian path chart", () => {
   const model = defaultModel();
-  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+  const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) }).plan;
 
   it("reconstructs the pen path through FK, one point per row, in mm", () => {
     const svg = chartById(renderCharts(plan, model), "cartesian-path").svg;
@@ -382,7 +382,7 @@ describe("cartesian path chart", () => {
   });
 
   it("draws the golden square as a square, not a rectangle (ADR 0007)", () => {
-    const square = runPipeline({ trajectory: SQUARE, model, planner: createPchipPlanner(model) });
+    const square = runPipeline({ trajectory: SQUARE, model, planner: createSplinePlanner(model) });
     const points = series(chartById(renderCharts(square.plan, model), "cartesian-path").svg)[0]!.points;
     const px = points.map(([x]) => x);
     const py = points.map(([, y]) => y);
@@ -459,7 +459,7 @@ describe("3D path view", () => {
 
   it("annotates the axes and states the units", () => {
     const model = defaultModel();
-    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) }).plan;
     const svg = chartById(renderCharts(plan, model), "path-3d").svg;
 
     // The bounding wireframe grounds the motion in space.
@@ -475,7 +475,7 @@ describe("3D path view", () => {
 
   it("keeps the bounding-box wireframe inside the plot frame", () => {
     const model = defaultModel();
-    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createPchipPlanner(model) }).plan;
+    const plan = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) }).plan;
     const svg = chartById(renderCharts(plan, model), "path-3d").svg;
     const d = svg.match(/<path class="axes-box" d="([^"]+)"/)![1] as string;
     const coords = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));

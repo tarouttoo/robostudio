@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CHART_IDS, PIPELINE_STAGES, renderCharts, renderMotionPreviewFrames, runPipeline } from "../export";
 import { line, trajectory } from "../core/trajectory";
 import { vec3 } from "../core/vec";
-import { createPchipPlanner } from "../motion";
+import { createSplinePlanner } from "../motion";
 import type { JointAngles, RobotModel } from "../kinematics/robot-model";
 import type { ProjectContent } from "../project";
 import { editorReducer, initialEditorState, type EditorState } from "./editor";
@@ -76,7 +76,7 @@ function directPipelineRun(model: RobotModel, state: EditorState) {
   return runPipeline({
     trajectory: trajectory(home, state.segments),
     model,
-    planner: createPchipPlanner(model),
+    planner: createSplinePlanner(model),
   });
 }
 

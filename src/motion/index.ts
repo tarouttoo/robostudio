@@ -7,7 +7,7 @@
  * May import from `core` and `kinematics`.
  */
 
-export { CONTROL_STEP_MS, createPchipPlanner } from "./planner";
+export { CONTROL_STEP_MS, createSplinePlanner } from "./planner";
 export type {
   MotionPlan,
   MotionRow,
@@ -16,7 +16,7 @@ export type {
   PlannerInput,
 } from "./planner";
 export { MotionError, type MotionErrorTag } from "./errors";
-export { pchip } from "./pchip";
-export type { Pchip, PchipSample } from "./pchip";
+export { quinticSpline } from "./spline";
+export type { QuinticSpline, SplineSample } from "./spline";
 export { sCurveAt } from "./profile";
 export type { ProfileSample, ProfileSpec } from "./profile";

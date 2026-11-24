@@ -56,6 +56,24 @@ export const PIPELINE_STAGES: readonly PipelineStage[] = [
 const LIMIT_SLACK = 1e-9;
 
 /**
+ * Slack on the cyclic-joint span test: a joint whose limits cover a
+ * full circle minus this slack is cyclic — its angle representation
+ * wraps at ±π while the motion itself is continuous (ADR 0021).
+ */
+const CYCLE_SPAN_SLACK = 1e-9;
+
+/**
+ * The nearest representative of `value` within ±π of `previous`
+ * (ADR 0021): a cyclic joint's solved angle continues from the previous
+ * sample's representative instead of jumping 2π across atan2's branch
+ * cut, so the interpolated motion never chases a fake revolution.
+ */
+function unwrapAngle(value: number, previous: number): number {
+  const delta = ((value - previous + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return previous + delta;
+}
+
+/**
  * Slack on the row-to-row continuity budget: joint motion between two
  * rows may slightly exceed `maxVelocity · 20 ms` because velocity
  * peaks between grid rows; 5 % absorbs that without letting real
@@ -196,6 +214,10 @@ function runIkStage(
   readonly outcome: PipelineStageOutcome;
 } {
   const solutions: (readonly number[])[] = [];
+  // Cyclic joints (limits spanning the full circle, e.g. MiKo-mini's
+  // q1) unwrap sample-to-sample; limited joints can never jump 2π
+  // between adjacent samples and keep their solved values (ADR 0021).
+  const cyclic = model.joints.map((joint) => joint.maxRad - joint.minRad >= 2 * Math.PI - CYCLE_SPAN_SLACK);
   for (let i = 0; i < path.samples.length; i++) {
     const sample = path.samples[i] as PathSample;
     const target: [number, number, number] = [sample.position.x, sample.position.y, sample.position.z];
@@ -209,7 +231,12 @@ function runIkStage(
         `segment ${sample.segmentIndex}: the model returned ${result.joints.length} joint angle(s) at ${fmtPoint(sample.position)}, expected ${model.joints.length} finite ones`,
       );
     }
-    solutions.push(result.joints);
+    const previous = solutions[solutions.length - 1];
+    solutions.push(
+      result.joints.map((value, j) =>
+        cyclic[j] && previous ? unwrapAngle(value, previous[j] as number) : value,
+      ),
+    );
   }
   return {
     solutions,

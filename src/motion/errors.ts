@@ -11,6 +11,7 @@
 export type MotionErrorTag =
   | "InvalidSolution"
   | "TimeScalingFailed"
+  | "PlanDurationExceeded"
   | "VerificationFailed";
 
 /**

@@ -6,7 +6,7 @@ import { vec3 } from "../core/vec";
 import { DEFAULT_MIKO_MINI_CONFIG } from "../kinematics/miko-mini";
 import { createRobotRegistry } from "../kinematics/registry";
 import type { JointConfig, JointAngles, RobotModel } from "../kinematics/robot-model";
-import { CONTROL_STEP_MS, createPchipPlanner, type MotionPlan, type Planner } from "./planner";
+import { CONTROL_STEP_MS, createSplinePlanner, type MotionPlan, type Planner } from "./planner";
 import { MotionError } from "./errors";
 
 /** The default MiKo-mini model from validated configuration. */
@@ -68,7 +68,7 @@ function expectWithinDynamicLimits(model: RobotModel, plan: MotionPlan): void {
 
 describe("planner seam: time grid", () => {
   const model = defaultModel();
-  const planner = createPchipPlanner(model);
+  const planner = createSplinePlanner(model);
 
   it("plans a gentle line into strictly monotonic rows at the 20 ms control step", () => {
     const traj = trajectory(vec3(240, 0, 260), [
@@ -154,7 +154,7 @@ describe("planner seam: time grid", () => {
 
 describe("planner seam: segment boundaries", () => {
   const model = defaultModel();
-  const planner = createPchipPlanner(model);
+  const planner = createSplinePlanner(model);
 
   /** Pen position per row via forward kinematics. */
   const penPositions = (plan: MotionPlan): readonly (readonly number[])[] =>
@@ -440,7 +440,7 @@ describe("planner seam: sub-step Segments", () => {
       maxAccelerationRadS2: 1e9,
       maxJerkRadS3: 1e9,
     });
-    const planner = createPchipPlanner(model);
+    const planner = createSplinePlanner(model);
     // 2.133 mm at 100 mm/s → 21.33 ms: the second Segment starts off-grid.
     // 1 mm at 100 mm/s → 10 ms nominal: shorter than the 20 ms control
     // step, so its unrounded window [21.33, 31.33) contains no grid moment
@@ -486,7 +486,7 @@ describe("planner seam: sub-step Segments", () => {
       maxAccelerationRadS2: 1e9,
       maxJerkRadS3: 0,
     });
-    const planner = createPchipPlanner(model);
+    const planner = createSplinePlanner(model);
     const traj = trajectory(vec3(0, 0, 0), [
       line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 100 }),
     ]);
@@ -499,5 +499,79 @@ describe("planner seam: sub-step Segments", () => {
       expect(error).toBeInstanceOf(MotionError);
       expect((error as MotionError).tag).toBe("TimeScalingFailed");
     }
+  });
+});
+
+describe("planner seam: plan duration cap (ADR 0021)", () => {
+  const model = defaultModel();
+  const planner = createSplinePlanner(model);
+
+  it("fails a plan past the 15-minute cap with a named PlanDurationExceeded", () => {
+    // The operator's 4-corner square, planned from raw IK solutions: the
+    // pipeline's ik stage unwraps cyclic joints before planning (its own
+    // regression test lives there); the planner alone must reject the
+    // resulting multi-hour stretch loudly instead of emitting it.
+    const traj = trajectory(vec3(-213, -213, 140), [
+      point({ target: vec3(-213, 213, 140), feed: 20, motionType: "LIN" }),
+    ]);
+    const { path, solutions } = planInputFromTrajectory(model, traj);
+
+    try {
+      planner.plan({ path, solutions });
+      throw new Error("expected a MotionError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(MotionError);
+      const motionError = error as MotionError;
+      expect(motionError.tag).toBe("PlanDurationExceeded");
+      expect(motionError.message).toMatch(/15-minute cap/);
+      expect(motionError.message).toMatch(/segment 0 stretches \d+×/);
+    }
+  });
+});
+
+describe("planner seam: C³ smoothness on the operator's square (ADR 0022)", () => {
+  const model = defaultModel();
+  const planner = createSplinePlanner(model);
+
+  /** The operator's 3-segment square at z = 140 mm, feed 20 mm/s (ADR 0022 repro). */
+  function square(): Trajectory {
+    return trajectory(vec3(213, 0, 305), [
+      point({ target: vec3(213, 213, 140), feed: 20, motionType: "LIN" }),
+      point({ target: vec3(213, -213, 140), feed: 20, motionType: "LIN" }),
+      point({ target: vec3(-213, -213, 140), feed: 20, motionType: "LIN" }),
+    ]);
+  }
+
+  it("keeps q3's acceleration and jerk near zero at the side midpoints", () => {
+    // PCHIP's C¹ knots made q3's jerk alternate ±181% of its limit
+    // between adjacent rows at the folded-arm side midpoints; the C³
+    // spline keeps both signals orders below the limits (measured:
+    // jerk 0.5% of limit, acceleration 2%, adjacent-row steps 0.03%).
+    const plan = planFromTrajectory(planner, model, square());
+    const q3 = model.joints[2] as JointConfig;
+    let maxJerk = 0;
+    let maxStepJerk = 0;
+    let maxStepAccel = 0;
+    for (let i = 1; i < plan.rows.length; i++) {
+      const prev = plan.rows[i - 1] as (typeof plan.rows)[number];
+      const row = plan.rows[i] as (typeof plan.rows)[number];
+      if (prev.segmentIndex !== row.segmentIndex) continue;
+      maxJerk = Math.max(maxJerk, Math.abs(row.qddd[2] as number));
+      maxStepJerk = Math.max(maxStepJerk, Math.abs((row.qddd[2] as number) - (prev.qddd[2] as number)));
+      maxStepAccel = Math.max(maxStepAccel, Math.abs((row.qdd[2] as number) - (prev.qdd[2] as number)));
+    }
+    expect(maxJerk).toBeLessThan(0.05 * q3.maxJerkRadS3);
+    expect(maxStepJerk).toBeLessThan(0.05 * q3.maxJerkRadS3);
+    expect(maxStepAccel).toBeLessThan(0.05 * q3.maxAccelerationRadS2);
+  });
+
+  it("plans the square in Feed-nominal time without an interpolation-stretch", () => {
+    // PCHIP's noisy knots stretched the plan to 57.9 s (102% of nominal);
+    // the spline needs no stretch: the Feed alone sets the pace.
+    const plan = planFromTrajectory(planner, model, square());
+    const nominalS = 1121.4 / 20;
+    const durationS = plan.durationMs / 1000;
+    expect(durationS).toBeGreaterThan(nominalS * 0.98);
+    expect(durationS).toBeLessThan(nominalS * 1.02);
   });
 });
