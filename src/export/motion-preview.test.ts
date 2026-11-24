@@ -7,10 +7,15 @@ import type { RobotModel } from "../kinematics/robot-model";
 import { CONTROL_STEP_MS, type MotionPlan, type MotionRow, type PlanSegmentRange } from "../motion/planner";
 import {
   MOTION_PREVIEW_COLORS,
+  MOTION_PREVIEW_HEIGHT,
+  MOTION_PREVIEW_PALETTE,
+  MOTION_PREVIEW_WIDTH,
   renderMotionPreviewFrames,
+  renderMotionPreviewGif,
   type MotionPreviewFrame,
   type PreviewPrimitive,
 } from "./motion-preview";
+import { decodeGifFrames } from "./gif-test-support";
 
 /** The default MiKo-mini model from validated configuration. */
 const model: RobotModel = (() => {
@@ -307,5 +312,65 @@ describe("motion preview frame geometry", () => {
         }
       }
     }
+  });
+});
+
+describe("motion preview GIF", () => {
+  it("starts the palette with the preview colors in contract order", () => {
+    expect(MOTION_PREVIEW_PALETTE.length).toBe(256);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.background]).toEqual([255, 255, 255]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.robot]).toEqual([51, 51, 51]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.trajectory]).toEqual([153, 153, 153]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.travelled]).toEqual([31, 119, 180]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.tcp]).toEqual([214, 39, 40]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.ptpTrace]).toEqual([255, 127, 14]);
+    expect(MOTION_PREVIEW_PALETTE[MOTION_PREVIEW_COLORS.home]).toEqual([44, 160, 44]);
+  });
+
+  it("encodes the frames as a decodable animated GIF paced over the duration", () => {
+    const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    const decoded = decodeGifFrames(gif.bytes);
+    expect(decoded.width).toBe(MOTION_PREVIEW_WIDTH);
+    expect(decoded.height).toBe(MOTION_PREVIEW_HEIGHT);
+    expect(decoded.frames.length).toBe(LINE_PLAN.rows.length);
+    // Paced over the plan's real duration (100 ms): six frames at the
+    // GIF's 1/100 s granularity (round(100 ms / 6) = 20 ms each), so
+    // the playback spans 120 ms — within a frame of the real duration.
+    expect(decoded.delays.length).toBe(LINE_PLAN.rows.length);
+    expect(decoded.delays).toEqual(LINE_PLAN.rows.map(() => 0.02));
+    const totalMs = decoded.delays.reduce((sum, d) => sum + d, 0) * 1000;
+    expect(totalMs).toBeGreaterThanOrEqual(80);
+    expect(totalMs).toBeLessThanOrEqual(130);
+  });
+
+  it("paints the background, the drawn line, and the Home Point into the pixels", () => {
+    const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    const decoded = decodeGifFrames(gif.bytes);
+    const pixels = decoded.frames[0] as number[];
+    const at = (x: number, y: number): number => pixels[y * MOTION_PREVIEW_WIDTH + x] as number;
+    // A corner far from any geometry is the background.
+    expect(at(3, 3)).toBe(MOTION_PREVIEW_COLORS.background);
+    // The Home Point marker (dot radius 3) colors its center.
+    expect(at(252, 154)).toBe(MOTION_PREVIEW_COLORS.home);
+    // The trajectory's far end pixel (golden [336, 105]) is gray.
+    expect(at(336, 105)).toBe(MOTION_PREVIEW_COLORS.trajectory);
+    // The robot's base foot pivot (golden [83, 348]) is robot-colored.
+    expect(at(83, 348)).toBe(MOTION_PREVIEW_COLORS.robot);
+  });
+
+  it("is deterministic: identical input yields byte-identical GIF bytes", () => {
+    const a = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    const b = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
+    expect(a.bytes).toEqual(b.bytes);
+    expect(a.frameCount).toBe(b.frameCount);
+  });
+
+  it("renders a long plan: the GIF holds exactly the frame budget's 300 frames", () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => row(i * CONTROL_STEP_MS, [0, 0, 0]));
+    const longPlan = craftedPlan(rows, { segmentIndex: 0, feed: 100, startMs: 0, endMs: 20_000 }, 19_980);
+    const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: longPlan, model });
+    expect(gif.frameCount).toBe(300);
+    const decoded = decodeGifFrames(gif.bytes);
+    expect(decoded.frames.length).toBe(300);
   });
 });

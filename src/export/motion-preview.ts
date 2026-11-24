@@ -32,6 +32,7 @@ import type { Vec3 as CoreVec3 } from "../core/vec";
 import type { RobotModel, Vec3 } from "../kinematics/robot-model";
 import { CONTROL_STEP_MS, type MotionPlan, type MotionRow } from "../motion/planner";
 import { projectIsometric } from "./charts";
+import { encodeGif, type GifColor, type GifFrame } from "./gif";
 
 /** Converts a core point (object shape) to the kinematics tuple shape. */
 function asTuple(p: CoreVec3): Vec3 {
@@ -102,6 +103,176 @@ export interface MotionPreviewInput {
 
 /** Slack on completion comparisons, absorbing float dust on range ends. */
 const TIME_SLACK_MS = 1e-9;
+
+/**
+ * The preview's RGB colors, in {@link MOTION_PREVIEW_COLORS} order —
+ * the head of the encoder's global GIF color table, so pixel indices
+ * and palette entries stay aligned (the golden discipline of ADR 0006
+ * applied to the preview's look).
+ */
+const PREVIEW_COLORS: readonly GifColor[] = [
+  [255, 255, 255], // background
+  [51, 51, 51], // robot
+  [153, 153, 153], // trajectory
+  [31, 119, 180], // travelled
+  [214, 39, 40], // tcp
+  [255, 127, 14], // ptpTrace
+  [44, 160, 44], // home
+];
+
+/**
+ * The full 256-entry global GIF color table: the preview colors first,
+ * padded with a web-safe 6×6×6 cube and a grayscale ramp so nearest-
+ * matching (unused by the exact-index rasterizer) would still behave
+ * sensibly. Deterministic; fixed for the format's 256-color maximum.
+ */
+export const MOTION_PREVIEW_PALETTE: readonly GifColor[] = (() => {
+  const palette: GifColor[] = [...PREVIEW_COLORS];
+  for (const r of [0, 51, 102, 153, 204, 255]) {
+    for (const g of [0, 51, 102, 153, 204, 255]) {
+      for (const b of [0, 51, 102, 153, 204, 255]) {
+        if (palette.length < 256) palette.push([r, g, b]);
+      }
+    }
+  }
+  for (let v = 5; v < 256 && palette.length < 256; v += 5) {
+    palette.push([v, v, v]);
+  }
+  return palette;
+})();
+
+/** One rendered Motion Preview GIF: the bytes and their frame count. */
+export interface MotionPreviewGif {
+  /** The GIF 89a bytes (write as `robot_motion.gif`). */
+  readonly bytes: Uint8Array;
+  /** The number of frames the animation holds. */
+  readonly frameCount: number;
+}
+
+/** Minimum frame delay, in hundredths of a second (GIF's unit). */
+const MIN_DELAY_CS = 2;
+
+/**
+ * Renders the Motion Preview as an animated GIF: the projected frames
+ * rasterized onto the fixed palette and encoded by the pure-JS GIF
+ * encoder. Frames are paced over the plan's real duration — one even
+ * delay per frame, at the GIF's 1/100 s granularity, floored at 20 ms
+ * (below that, players clamp anyway). Pure function; identical input
+ * yields byte-identical output.
+ */
+export function renderMotionPreviewGif(input: MotionPreviewInput): MotionPreviewGif {
+  const frames = renderMotionPreviewFrames(input);
+  const frameCount = frames.length;
+  const delayCs = Math.max(
+    MIN_DELAY_CS,
+    Math.round(input.plan.durationMs / Math.max(1, frameCount) / 10),
+  );
+  const gifFrames: GifFrame[] = frames.map((frame) => ({
+    delayCs,
+    indexed: rasterizeFrame(frame),
+  }));
+  return {
+    bytes: encodeGif({
+      width: MOTION_PREVIEW_WIDTH,
+      height: MOTION_PREVIEW_HEIGHT,
+      palette: MOTION_PREVIEW_PALETTE,
+      frames: gifFrames,
+    }),
+    frameCount,
+  };
+}
+
+/**
+ * Rasterizes one frame's primitives onto the palette: background
+ * first, then primitives in draw order (later draws over earlier).
+ * Pure integer pixel math — no anti-aliasing, no floats in the pixel
+ * buffer — so the bytes are exactly reproducible.
+ */
+function rasterizeFrame(frame: MotionPreviewFrame): Uint8Array {
+  const pixels = new Uint8Array(MOTION_PREVIEW_WIDTH * MOTION_PREVIEW_HEIGHT);
+  pixels.fill(MOTION_PREVIEW_COLORS.background);
+  for (const primitive of frame.primitives) {
+    if (primitive.kind === "dot") {
+      fillDisc(pixels, primitive.points[0] as readonly [number, number], primitive.width, primitive.colorIndex);
+      continue;
+    }
+    strokePolyline(pixels, primitive.points, primitive.width, primitive.colorIndex, primitive.kind === "dashed");
+  }
+  return pixels;
+}
+
+/** Paints a pixel, clipped to the canvas. */
+function plot(pixels: Uint8Array, x: number, y: number, colorIndex: number): void {
+  if (x < 0 || y < 0 || x >= MOTION_PREVIEW_WIDTH || y >= MOTION_PREVIEW_HEIGHT) return;
+  pixels[y * MOTION_PREVIEW_WIDTH + x] = colorIndex;
+}
+
+/** Paints a `width` × `width` block (the thick stroke's pen). */
+function plotBlock(pixels: Uint8Array, x: number, y: number, width: number, colorIndex: number): void {
+  const half = Math.floor(width / 2);
+  for (let dy = 0; dy < width; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      plot(pixels, x + dx - half, y + dy - half, colorIndex);
+    }
+  }
+}
+
+/**
+ * Strokes a polyline in Bresenham steps; `dashed` breaks the stroke
+ * into an on/off pixel-step pattern (4 on, 3 off) counted along the
+ * whole polyline, so dashes straddle joints naturally.
+ */
+function strokePolyline(
+  pixels: Uint8Array,
+  points: readonly (readonly [number, number])[],
+  width: number,
+  colorIndex: number,
+  dashed: boolean,
+): void {
+  let step = 0;
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1] as readonly [number, number];
+    const [x1, y1] = points[i] as readonly [number, number];
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      if (!dashed || step % 7 < 4) plotBlock(pixels, x, y, width, colorIndex);
+      step++;
+      if (x === x1 && y === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+  }
+}
+
+/** Fills a disc of radius `radius` centered at `center`, clipped. */
+function fillDisc(
+  pixels: Uint8Array,
+  center: readonly [number, number],
+  radius: number,
+  colorIndex: number,
+): void {
+  const [cx, cy] = center;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx * dx + dy * dy <= radius * radius) {
+        plot(pixels, cx + dx, cy + dy, colorIndex);
+      }
+    }
+  }
+}
 
 /**
  * Renders every preview frame's projected geometry: the full
