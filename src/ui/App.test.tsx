@@ -146,4 +146,11 @@ describe("app shell", () => {
     expect(html).toMatch(/<button[^>]*>[^<]*Чертёж/);
     expect(html).toContain("<canvas");
   });
+
+  it("offers the «Вписать зону» canvas control that re-fits the Reachability zone", () => {
+    // The fit control belongs to the drawing canvas (it re-fits the
+    // zone into the live viewport), like the startup view.
+    const html = renderToString(<App />).replace(/<!-- -->/g, "");
+    expect(html).toContain("Вписать зону");
+  });
 });
