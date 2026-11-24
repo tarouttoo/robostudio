@@ -193,6 +193,10 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
       id: config.id,
       name: config.name,
       joints: limits,
+      // Triangle inequality on the arm: the base column (h), the two
+      // planar links, and the tool offset sum to the farthest the TCP
+      // can sit from the model origin — a rigorous workspace bound.
+      workspaceRadiusMm: baseHeightMm + upperArmMm + forearmMm + toolOffsetMm,
       forwardKinematics,
       inverseKinematics,
     },

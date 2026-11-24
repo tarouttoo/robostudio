@@ -15,6 +15,7 @@ import {
   type PointReachability,
 } from "../../kinematics/reachability";
 import type { RobotModel } from "../../kinematics/robot-model";
+import type { WorldBounds } from "./transform";
 
 /** Edge length of one map cell, in millimetres. */
 export const REACHABILITY_CELL_MM = 5;
@@ -26,7 +27,9 @@ export const REACHABILITY_COLORS: Record<PointReachability, string> = {
   "angle-limit": "#f2e2bc",
 };
 
-/** The sampled Reachability map over the operator's Working Plane. */
+/**
+ * The sampled Reachability map over the operator's Working Plane.
+ */
 export interface ReachabilitySampler {
   /** Lattice cell edge length, in millimetres. */
   readonly cellMm: number;
@@ -37,6 +40,15 @@ export interface ReachabilitySampler {
    * query inside it answers from the cache.
    */
   statusAt(u: number, v: number): PointReachability;
+
+  /**
+   * The Reachability zone: the Working Plane millimetre rectangle
+   * covering every non-unreachable lattice cell, or null when no cell
+   * is reachable. Scanned lazily over the Robot Model's workspace
+   * radius (a rigorous bound, so the whole zone is always covered) and
+   * memoized; the scan feeds the same cell cache the painting uses.
+   */
+  zoneBounds(): WorldBounds | null;
 }
 
 /**
@@ -66,5 +78,37 @@ export function createReachabilitySampler(
     return status;
   };
 
-  return { cellMm, statusAt };
+  // Memoized lazily: the scan costs one IK call per workspace cell and
+  // runs at most once per map (per Robot Model, plane, fixed coordinate).
+  let zoneCache: WorldBounds | null | undefined;
+  const zoneBounds = (): WorldBounds | null => {
+    if (zoneCache !== undefined) return zoneCache;
+    const radius = model.workspaceRadiusMm;
+    const lastIndex = Math.ceil(radius / cellMm);
+    let minI = Number.POSITIVE_INFINITY;
+    let maxI = Number.NEGATIVE_INFINITY;
+    let minJ = Number.POSITIVE_INFINITY;
+    let maxJ = Number.NEGATIVE_INFINITY;
+    for (let j = -lastIndex; j < lastIndex; j++) {
+      for (let i = -lastIndex; i < lastIndex; i++) {
+        if (statusAt((i + 0.5) * cellMm, (j + 0.5) * cellMm) === "unreachable") continue;
+        minI = Math.min(minI, i);
+        maxI = Math.max(maxI, i);
+        minJ = Math.min(minJ, j);
+        maxJ = Math.max(maxJ, j);
+      }
+    }
+    zoneCache =
+      minI <= maxI
+        ? {
+            minU: minI * cellMm,
+            maxU: (maxI + 1) * cellMm,
+            minV: minJ * cellMm,
+            maxV: (maxJ + 1) * cellMm,
+          }
+        : null;
+    return zoneCache;
+  };
+
+  return { cellMm, statusAt, zoneBounds };
 }

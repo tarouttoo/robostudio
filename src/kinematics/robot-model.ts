@@ -83,6 +83,14 @@ export interface RobotModel {
   readonly joints: readonly JointConfig[];
 
   /**
+   * Upper bound on the distance from the model-frame origin at which the
+   * end-effector can be placed, in millimetres. May overestimate but
+   * must never underestimate: workspace scans (e.g. the Reachability
+   * zone's bounds) rely on it to cover the whole workspace.
+   */
+  readonly workspaceRadiusMm: number;
+
+  /**
    * Forward kinematics: joint angles in radians → end-effector position
    * in millimetres.
    * @throws when `angles.length` differs from {@link joints.length}.

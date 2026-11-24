@@ -422,6 +422,13 @@ export function createGenericChainModel(config: GenericChainRobotConfig): Generi
       id: config.id,
       name: config.name,
       joints,
+      // Triangle inequality over the chain: every joint adds at most
+      // |origin| + |offset| regardless of rotation, so the sum bounds
+      // the farthest the end-effector can sit from the model origin.
+      workspaceRadiusMm: joints.reduce(
+        (sum, joint) => sum + vec3Distance([0, 0, 0], joint.origin) + vec3Distance([0, 0, 0], joint.offset),
+        0,
+      ),
       forwardKinematics,
       inverseKinematics,
     },
