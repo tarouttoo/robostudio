@@ -94,7 +94,7 @@ export function MotionPreviewDialog(props: MotionPreviewDialogProps): JSX.Elemen
     return () => cancelAnimationFrame(raf);
   }, [playing, durationMs]);
 
-  // Esc closes the dialog, like every modal.
+  // Esc closes the dialog.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") onClose();
