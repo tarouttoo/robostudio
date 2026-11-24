@@ -15,9 +15,13 @@ here.
   existing Project Files, and in exports, but new drawing places
   chained Points and Arcs.
 - **Arc (Дуга)** — a Segment defined by Working Plane + start + end +
-  direction + radius **R** or center. Direction is **CW (по часовой)** or
-  **CCW (против часовой)**. There is no three-point Arc; the center is
-  never inferred from a middle click (ADR `0005`).
+  direction + radius **R** or center. Direction is **CW (по часовой)**
+  or **CCW (против часовой)**. There is no three-point Arc; the center
+  is never inferred from a middle click (ADR `0005`). The «Дуга» tool
+  joins the chain: an Arc always starts where the previous Segment
+  ended (the first at the Home Point), so the radius definition takes
+  one click — the Arc's end, with the radius from the numeric field —
+  and the center definition two: center, then end.
 - **Point (Точка)** — a Segment that moves the pen to a target without
   drawing geometry, as a Move from the previous Segment's end (the
   first from the Home Point). Each Point carries its own Motion Type —

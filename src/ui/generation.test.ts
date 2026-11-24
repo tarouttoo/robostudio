@@ -144,6 +144,22 @@ describe("generation: session", () => {
     expect(outcome.result.plan.rows.length).toBeGreaterThan(50);
   });
 
+  it("plans a chained Move → Arc → Move drawing continuously through the shipped MiKo-mini", () => {
+    // Drawn through the editor reducer around the default Home Point
+    // [213, 0, 305]: a LIN Move, a chained radius-mode Arc (R = 10),
+    // and a chained Move — one continuous Trajectory, every join exact.
+    let state: EditorState = { ...initialEditorState, plane: "XY", fixedMm: 305 };
+    state = editorReducer(state, { type: "canvasClick", u: 223, v: 0 });
+    state = editorReducer({ ...state, tool: "arc", arcRadiusMm: 10 }, { type: "canvasClick", u: 231, v: 0 });
+    state = editorReducer({ ...state, tool: "point" }, { type: "canvasClick", u: 239, v: 0 });
+    expect(state.segments.map((s) => s.kind)).toEqual(["point", "arc", "point"]);
+    const outcome = okOutcome(createGenerationSession(MIKO_MINI), state);
+    // Every validation stage ran — the chained joins plan continuously.
+    expect(outcome.result.stages.map((s) => s.stage)).toEqual([...PIPELINE_STAGES]);
+    // The Motion Plan spans the whole chained path: Move + arc + Move.
+    expect(outcome.result.plan.rows.length).toBeGreaterThan(50);
+  });
+
   it("stops with a named failure when the model cannot reach a point", () => {
     const far = [line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })];
     const outcome = createGenerationSession(scriptedModel()).run(stateWith(far));

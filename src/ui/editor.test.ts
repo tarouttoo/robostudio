@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { planeCoords } from "../core";
 import { point as corePoint, vec2, vec3 } from "../core";
+import { discretizeTrajectory } from "../core/discretize";
+import { trajectory } from "../core/trajectory";
 import { checkPointReachability } from "../kinematics/reachability";
 import { type ProjectContent } from "../project";
 import {
@@ -28,9 +30,17 @@ function placePoint(state: EditorState, u: number, v: number): EditorState {
   return click(state, u, v);
 }
 
-/** Draws an Arc (radius mode, R = 10 mm) with two clicks, returning the resulting state. */
-function drawArc(state: EditorState, u1: number, v1: number, u2: number, v2: number): EditorState {
-  return click(click({ ...state, tool: "arc", arcRadiusMm: 10 }, u1, v1), u2, v2);
+/** Places the Home Point with one click (the Home Point tool). */
+function placeHome(state: EditorState, u: number, v: number): EditorState {
+  return click({ ...state, tool: "home" }, u, v);
+}
+
+/**
+ * Draws a chained radius-mode Arc (R = 10 mm) with one click — the
+ * Arc's end; the Arc starts where the chain stands.
+ */
+function drawArc(state: EditorState, u: number, v: number): EditorState {
+  return click({ ...state, tool: "arc", arcRadiusMm: 10 }, u, v);
 }
 
 describe("editor state", () => {
@@ -46,7 +56,6 @@ describe("editor state", () => {
       arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
       home: DEFAULT_HOME_POINT,
       segments: [],
-      draftStart: null,
       draftCenter: null,
       error: null,
     });
@@ -75,13 +84,7 @@ describe("editor state", () => {
     expect(first.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
     expect(second.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
     // One-click commits hold no draft.
-    expect(state.draftStart).toBeNull();
-  });
-
-  it("keeps an Arc draft pending after the first click", () => {
-    const state = click({ ...initialEditorState, tool: "arc" }, 10, 20);
-    expect(state.segments).toHaveLength(0);
-    expect(state.draftStart).toEqual(vec2(10, 20));
+    expect(state.draftCenter).toBeNull();
   });
 
   it("stacks Segments in draw order", () => {
@@ -110,11 +113,13 @@ describe("editor state", () => {
     });
   }
 
-  it("cancels the draft when the Working Plane changes", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
-    const switched = editorReducer(drafting, { type: "setPlane", plane: "YZ" });
+  it("cancels a pending Arc center when the Working Plane changes", () => {
+    let state = placeHome(initialEditorState, 0, 0);
+    state = click({ ...state, tool: "arc", arcMode: "center" }, 5, 5);
+    expect(state.draftCenter).toEqual(vec2(5, 5));
+    const switched = editorReducer(state, { type: "setPlane", plane: "YZ" });
     expect(switched.plane).toBe("YZ");
-    expect(switched.draftStart).toBeNull();
+    expect(switched.draftCenter).toBeNull();
   });
 
   it("ignores non-finite click coordinates", () => {
@@ -151,12 +156,12 @@ describe("editor state", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "home" });
     state = click(state, 1, 2);
     state = placePoint({ ...state, tool: "point" }, 0, 0);
-    // A pending Arc draft is dropped by the clear too.
-    state = click({ ...state, tool: "arc" }, 9, 9);
+    // A pending Arc center is dropped by the clear too.
+    state = click({ ...state, tool: "arc", arcMode: "center" }, 9, 9);
     const cleared = editorReducer(state, { type: "clear" });
     expect(cleared.segments).toEqual([]);
     expect(cleared.home).toEqual(DEFAULT_HOME_POINT);
-    expect(cleared.draftStart).toBeNull();
+    expect(cleared.draftCenter).toBeNull();
     // Plane, fixed coordinate, feed, and tool survive the clear.
     expect(cleared.plane).toBe(state.plane);
     expect(cleared.feedMmMin).toBe(state.feedMmMin);
@@ -179,9 +184,9 @@ describe("editor state", () => {
   });
 
   it("switching tools cancels a pending draft", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
+    const drafting = click({ ...initialEditorState, tool: "arc", arcMode: "center" }, 5, 5);
     const toHome = editorReducer(drafting, { type: "setTool", tool: "home" });
-    expect(toHome.draftStart).toBeNull();
+    expect(toHome.draftCenter).toBeNull();
   });
 
   it("Point tool commits a Point Segment with one click: a Move to the target without drawn geometry", () => {
@@ -196,7 +201,7 @@ describe("editor state", () => {
     // The default Motion Type is LIN: the Move follows the drawn line.
     expect(seg.motionType).toBe("LIN");
     // A Point has no draft: the next click places the next Point in the chain.
-    expect(state.draftStart).toBeNull();
+    expect(state.draftCenter).toBeNull();
   });
 
   it("commits PTP Moves while the Motion Type toggle is PTP, and keeps editing the next Move", () => {
@@ -251,12 +256,10 @@ describe("editor state", () => {
     expect(initialEditorState.error).toBeNull();
   });
 
-  it("commits a canonical Arc after two clicks in radius mode", () => {
-    const state = editorReducer(
-      { ...initialEditorState, tool: "arc", arcRadiusMm: 10 },
-      { type: "canvasClick", u: 0, v: 0 },
-    );
-    const done = click(state, 8, 0);
+  it("commits a canonical Arc with one click in radius mode, starting at the Home Point", () => {
+    // The Home Point on the plane: the first Arc starts exactly there.
+    const homed = placeHome(initialEditorState, 0, 0);
+    const done = click({ ...homed, tool: "arc", arcRadiusMm: 10 }, 8, 0);
     expect(done.segments).toHaveLength(1);
     const seg = done.segments[0]!;
     expect(seg.kind).toBe("arc");
@@ -270,14 +273,28 @@ describe("editor state", () => {
     expect(seg.sweepRad).toBeGreaterThan(0);
     expect(seg.sweepRad).toBeLessThan(Math.PI);
     expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
-    expect(done.draftStart).toBeNull();
+    // One-click commits hold no draft.
+    expect(done.draftCenter).toBeNull();
     expect(done.error).toBeNull();
   });
 
-  it("CW and CCW resolve distinct arcs from the same clicks", () => {
-    const clicks = { type: "canvasClick", u: 0, v: 0 } as const;
-    const ccw = click(editorReducer({ ...initialEditorState, tool: "arc", arcDirection: "CCW" }, clicks), 8, 0);
-    const cw = click(editorReducer({ ...initialEditorState, tool: "arc", arcDirection: "CW" }, clicks), 8, 0);
+  it("chains an Arc to the previous Segment's end: the Arc starts where the Move arrived", () => {
+    const moved = placePoint(initialEditorState, 10, 5);
+    const done = drawArc(moved, 18, 5);
+    expect(done.segments).toHaveLength(2);
+    const seg = done.segments[1]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    // The start is the Move's target, bit for bit — not a stored click.
+    expect(seg.start).toEqual({ x: 10, y: 5, z: 0 });
+    expect(seg.end).toEqual({ x: 18, y: 5, z: 0 });
+    expect(seg.radiusMm).toBe(10);
+  });
+
+  it("CW and CCW resolve distinct chained arcs from the same end click", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    const ccw = click({ ...homed, tool: "arc", arcRadiusMm: 10, arcDirection: "CCW" }, 8, 0);
+    const cw = click({ ...homed, tool: "arc", arcRadiusMm: 10, arcDirection: "CW" }, 8, 0);
     const ccwSeg = ccw.segments[0]!;
     const cwSeg = cw.segments[0]!;
     expect(ccwSeg.kind).toBe("arc");
@@ -289,38 +306,38 @@ describe("editor state", () => {
     expect(ccwSeg.sweepRad).toBeGreaterThan(0);
   });
 
-  it("rejects endpoints farther apart than 2·R at draw time with a readable message, keeping the draft start", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
-    const rejected = click(drafting, 50, 0);
+  it("rejects an end farther from the chain end than 2·R at draw time with a readable message", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    const rejected = click({ ...homed, tool: "arc", arcRadiusMm: 10 }, 50, 0);
     expect(rejected.segments).toHaveLength(0);
-    // The draft start stays so the operator can click a valid end.
-    expect(rejected.draftStart).toEqual(vec2(0, 0));
+    // The radius-mode Arc holds no draft: the operator just clicks again.
+    expect(rejected.draftCenter).toBeNull();
     expect(rejected.error).toContain("невозможна");
     expect(rejected.error).toContain("радиус");
   });
 
-  it("rejects coincident endpoint clicks (no unique center from R)", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 3, 4);
-    const rejected = click(drafting, 3, 4);
+  it("rejects an end click on the chain end (no unique center from R)", () => {
+    const homed = placeHome(initialEditorState, 3, 4);
+    const rejected = click({ ...homed, tool: "arc", arcRadiusMm: 10 }, 3, 4);
     expect(rejected.segments).toHaveLength(0);
     expect(rejected.error).toContain("невозможна");
   });
 
   it("clears the rejection once a valid retry commits", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
-    const rejected = click(drafting, 50, 0);
+    const homed = placeHome(initialEditorState, 0, 0);
+    const rejected = click({ ...homed, tool: "arc", arcRadiusMm: 10 }, 50, 0);
     const retried = click(rejected, 8, 0);
     expect(retried.segments).toHaveLength(1);
     expect(retried.error).toBeNull();
-    expect(retried.draftStart).toBeNull();
+    expect(retried.draftCenter).toBeNull();
   });
 
   it("applies radius and direction changes live to the next commit", () => {
-    let state = editorReducer(initialEditorState, { type: "setTool", tool: "arc" });
+    const homed = placeHome(initialEditorState, 0, 0);
+    let state: EditorState = { ...homed, tool: "arc" };
     state = editorReducer(state, { type: "setArcRadiusMm", raw: "25" });
     state = editorReducer(state, { type: "setArcDirection", direction: "CW" });
-    const drafting = click(state, 0, 0);
-    const done = click(drafting, 10, 0);
+    const done = click(state, 10, 0);
     const seg = done.segments[0]!;
     expect(seg.kind).toBe("arc");
     if (seg.kind !== "arc") return;
@@ -337,18 +354,19 @@ describe("editor state", () => {
     }
   });
 
-  it("cancelling the draft clears the rejection", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 0, 0);
-    const rejected = click(drafting, 50, 0);
+  it("cancelDraft clears the rejection (the radius-mode Arc holds no draft)", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    const rejected = click({ ...homed, tool: "arc", arcRadiusMm: 10 }, 50, 0);
     const cancelled = editorReducer(rejected, { type: "cancelDraft" });
     expect(cancelled.error).toBeNull();
-    expect(cancelled.draftStart).toBeNull();
+    expect(cancelled.draftCenter).toBeNull();
   });
 
-  it("center mode: three clicks commit an Arc with the clicked center and the end snapped onto the circle", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 0, v: 0 });
-    state = click(state, 10, 0); // the center, 10 mm from the start
-    expect(state.draftStart).toEqual(vec2(0, 0));
+  it("center mode: two clicks commit an Arc — the center, then the end snapped onto the circle", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    let state: EditorState = { ...homed, tool: "arc", arcMode: "center" };
+    state = click(state, 10, 0); // the center, 10 mm from the chain end
+    expect(state.segments).toHaveLength(0);
     expect(state.draftCenter).toEqual(vec2(10, 0));
     state = click(state, 19, 7); // off-circle on purpose: snapped onto the circle
     expect(state.segments).toHaveLength(1);
@@ -358,20 +376,23 @@ describe("editor state", () => {
     expect(seg.center).toEqual({ x: 10, y: 0, z: 0 });
     expect(seg.radiusMm).toBe(10);
     expect(seg.direction).toBe("CCW");
-    // The end lands exactly on the circle around the center.
+    // The Arc starts at the Home Point; the end lands exactly on the circle.
+    expect(seg.start).toEqual({ x: 0, y: 0, z: 0 });
     const end = planeCoords("XY", seg.end);
     expect(Math.hypot(end.u - 10, end.v)).toBeCloseTo(10, 12);
-    expect(state.draftStart).toBeNull();
     expect(state.draftCenter).toBeNull();
     expect(state.error).toBeNull();
   });
 
   it("center mode: CW and CCW sweep opposite ways from the same clicks", () => {
     const draw = (direction: "CW" | "CCW"): EditorState => {
-      let state = editorReducer(
-        { ...initialEditorState, tool: "arc", arcMode: "center", arcDirection: direction },
-        { type: "canvasClick", u: 0, v: 0 },
-      );
+      const homed = placeHome(initialEditorState, 0, 0);
+      let state: EditorState = {
+        ...homed,
+        tool: "arc",
+        arcMode: "center",
+        arcDirection: direction,
+      };
       state = click(state, 10, 0);
       return click(state, 16, 8);
     };
@@ -384,38 +405,61 @@ describe("editor state", () => {
     expect(cw.sweepRad).toBeLessThan(0);
   });
 
-  it("center mode: rejects a center click on the start with a readable message", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 3, v: 4 });
-    state = click(state, 3, 4);
-    expect(state.segments).toHaveLength(0);
-    expect(state.draftCenter).toBeNull();
-    expect(state.draftStart).toEqual(vec2(3, 4));
-    expect(state.error).toContain("невозможна");
-    expect(state.error).toContain("центр");
+  it("center mode: rejects a center click on the chain end with a readable message", () => {
+    const homed = placeHome(initialEditorState, 3, 4);
+    const rejected = click({ ...homed, tool: "arc", arcMode: "center" }, 3, 4);
+    expect(rejected.segments).toHaveLength(0);
+    expect(rejected.draftCenter).toBeNull();
+    expect(rejected.error).toContain("невозможна");
+    expect(rejected.error).toContain("центр");
     // A side click after the rejection still pends the center.
-    const recovered = click(state, 13, 4);
+    const recovered = click(rejected, 13, 4);
     expect(recovered.error).toBeNull();
     expect(recovered.draftCenter).toEqual(vec2(13, 4));
   });
 
-  it("center mode: an end click on the center is rejected, keeping start and center", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 0, v: 0 });
+  it("center mode: an end click on the center is rejected, keeping the pending center", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    let state: EditorState = { ...homed, tool: "arc", arcMode: "center" };
     state = click(state, 10, 0);
     const rejected = click(state, 10, 0);
     expect(rejected.segments).toHaveLength(0);
-    expect(rejected.draftStart).toEqual(vec2(0, 0));
     expect(rejected.draftCenter).toEqual(vec2(10, 0));
     expect(rejected.error).toContain("невозможна");
   });
 
-  it("switching the Arc mode keeps the pending start and drops a pending center", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc", arcMode: "center" }, { type: "canvasClick", u: 1, v: 2 });
-    state = click(state, 5, 2);
+  it("switching the Arc mode drops a pending center", () => {
+    let state = placeHome(initialEditorState, 0, 0);
+    state = click({ ...state, tool: "arc", arcMode: "center" }, 5, 2);
     const switched = editorReducer(state, { type: "setArcMode", mode: "radius" });
     expect(switched.arcMode).toBe("radius");
-    expect(switched.draftStart).toEqual(vec2(1, 2));
     expect(switched.draftCenter).toBeNull();
     expect(switched.error).toBeNull();
+  });
+
+  it("rejects an Arc whose chain start lies off the current plane, with a readable message", () => {
+    // The default Home Point [213, 0, 305] is off the XY plane at fixed 0:
+    // an Arc lies entirely in its Working Plane, so the draw is refused.
+    const rejected = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, 221, 0);
+    expect(rejected.segments).toHaveLength(0);
+    expect(rejected.error).toContain("невозможна");
+    expect(rejected.error).toContain("плоскости");
+  });
+
+  it("rejects an Arc with no chain start: no Home Point and nothing drawn", () => {
+    const rejected = click({ ...initialEditorState, home: null, tool: "arc" }, 10, 10);
+    expect(rejected.segments).toHaveLength(0);
+    expect(rejected.error).toContain("невозможна");
+  });
+
+  it("undoes across chained Arcs and Moves: one Move or Arc per Отменить", () => {
+    const moved = placePoint(initialEditorState, 0, 0);
+    const drawn = drawArc(moved, 8, 0);
+    const undoneArc = editorReducer(drawn, { type: "undo" });
+    expect(undoneArc.segments).toHaveLength(1);
+    expect(undoneArc.segments[0]!.kind).toBe("point");
+    const undoneMove = editorReducer(undoneArc, { type: "undo" });
+    expect(undoneMove.segments).toHaveLength(0);
   });
 
   it("numeric entry commits exactly like a click, landing the typed coordinates exactly", () => {
@@ -446,11 +490,28 @@ describe("editor state", () => {
     expect(state).toEqual(initialEditorState);
   });
 
-  it("numeric entry drives the Arc draft: two entries commit a radius-mode Arc", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc", arcRadiusMm: 10 }, { type: "numericEntry", u: 0, v: 0 });
-    state = editorReducer(state, { type: "numericEntry", u: 8, v: 0 });
+  it("numeric entry drives the chained Arc: one entry commits a radius-mode Arc from the Home Point", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    const done = editorReducer({ ...homed, tool: "arc", arcRadiusMm: 10 }, { type: "numericEntry", u: 8, v: 0 });
+    expect(done.segments).toHaveLength(1);
+    const seg = done.segments[0]!;
+    expect(seg.kind).toBe("arc");
+    if (seg.kind !== "arc") return;
+    expect(seg.start).toEqual({ x: 0, y: 0, z: 0 });
+    expect(seg.end).toEqual({ x: 8, y: 0, z: 0 });
+  });
+
+  it("numeric entry drives the chained Arc: two entries commit a center-mode Arc", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    let state = editorReducer(
+      { ...homed, tool: "arc", arcMode: "center" },
+      { type: "numericEntry", u: 10, v: 0 },
+    );
+    expect(state.draftCenter).toEqual(vec2(10, 0));
+    state = editorReducer(state, { type: "numericEntry", u: 19, v: 7 });
     expect(state.segments).toHaveLength(1);
     expect(state.segments[0]!.kind).toBe("arc");
+    expect(state.draftCenter).toBeNull();
   });
 
   it("edits one Segment's Feed in mm/min without touching the others", () => {
@@ -463,10 +524,9 @@ describe("editor state", () => {
   });
 
   it("edits the Feed of an Arc Segment in place", () => {
-    let state = editorReducer({ ...initialEditorState, tool: "arc" }, { type: "canvasClick", u: 0, v: 0 });
-    state = click(state, 8, 0);
-    const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw: "600" });
-    const seg = edited.segments[0]!;
+    const drawn = drawArc(placePoint(initialEditorState, 0, 0), 8, 0);
+    const edited = editorReducer(drawn, { type: "setSegmentFeedMmMin", index: 1, raw: "600" });
+    const seg = edited.segments[1]!;
     expect(seg.kind).toBe("arc");
     if (seg.kind !== "arc") return;
     expect(seg.feed).toBe(10); // 600 mm/min = 10 mm/s
@@ -502,27 +562,31 @@ describe("editor state", () => {
     expect(draftPreviewOf(ptp)).toEqual({ kind: "move", motionType: "PTP", start: vec2(10, 4) });
     // No Home Point and nothing drawn: no Move to preview.
     expect(draftPreviewOf({ ...initialEditorState, home: null })).toBeNull();
-    // A pending radius-mode Arc draft carries radius and direction.
-    const arcDraft = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 14, arcDirection: "CW" }, 3, 4);
+    // The chained Arc previews from the chain end with no click needed:
+    // radius and direction ride along, so the pending Arc follows the
+    // cursor before any click at all.
+    const arcDraft = { ...chained, tool: "arc" as const, arcRadiusMm: 14, arcDirection: "CW" as const };
     expect(draftPreviewOf(arcDraft)).toEqual({
       kind: "arcRadius",
-      start: vec2(3, 4),
+      start: vec2(10, 4),
       radiusMm: 14,
       direction: "CW",
     });
-    // A pending center-mode draft: center null after click 1, set after click 2.
-    let centerDraft = click({ ...initialEditorState, tool: "arc", arcMode: "center", arcDirection: "CW" }, 1, 1);
-    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: null, direction: "CW" });
+    // A center-mode draft: center null before the first click, set after it.
+    let centerDraft: EditorState = { ...arcDraft, arcMode: "center" };
+    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(10, 4), center: null, direction: "CW" });
     centerDraft = click(centerDraft, 6, 1);
-    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: vec2(6, 1), direction: "CW" });
+    expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(10, 4), center: vec2(6, 1), direction: "CW" });
+    // No chain start (no Home Point, nothing drawn): no Arc to preview.
+    expect(draftPreviewOf({ ...arcDraft, home: null, segments: [] })).toBeNull();
     // The Home Point tool holds no draft.
     const homeState = editorReducer({ ...initialEditorState, tool: "home" }, { type: "canvasClick", u: 5, v: 5 });
     expect(draftPreviewOf(homeState)).toBeNull();
   });
 
   it("chains the Move preview to an Arc's end: Points continue where the Arc finished", () => {
-    const drawn = drawArc(initialEditorState, 0, 0, 8, 0);
-    expect(drawn.segments).toHaveLength(1);
+    const drawn = drawArc(placePoint(initialEditorState, 0, 0), 8, 0);
+    expect(drawn.segments).toHaveLength(2);
     // Back to the Point tool: the pending Move starts at the Arc's end,
     // not at the Home Point.
     const chaining = editorReducer(drawn, { type: "setTool", tool: "point" });
@@ -532,11 +596,36 @@ describe("editor state", () => {
     expect(preview.start).toEqual(vec2(8, 0));
   });
 
-  it("cancelDraft drops a pending draft without committing a Segment", () => {
-    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
-    const cancelled = editorReducer(drafting, { type: "cancelDraft" });
-    expect(cancelled.draftStart).toBeNull();
+  it("cancelDraft drops a pending Arc center without committing a Segment", () => {
+    let state = placeHome(initialEditorState, 0, 0);
+    state = click({ ...state, tool: "arc", arcMode: "center" }, 5, 5);
+    const cancelled = editorReducer(state, { type: "cancelDraft" });
+    expect(cancelled.draftCenter).toBeNull();
     expect(cancelled.segments).toHaveLength(0);
+  });
+
+  it("a chained Move → Arc → Move drawing discretizes continuously: no duplicate samples at the joins", () => {
+    const homed = placeHome(initialEditorState, 0, 0);
+    let state: EditorState = { ...homed, tool: "point" };
+    state = click(state, 0, 0); // Move onto the chain start
+    state = click({ ...state, tool: "arc", arcRadiusMm: 10 }, 8, 0); // chained Arc
+    state = click({ ...state, tool: "point" }, 16, 0); // chained Move
+    if (state.home === null) throw new Error("test drew without a Home Point");
+    const path = discretizeTrajectory(trajectory(state.home, [...state.segments]));
+    expect(path.samples.length).toBeGreaterThan(3);
+    // No two consecutive samples share a position: joins are merged.
+    for (let i = 1; i < path.samples.length; i++) {
+      const prev = path.samples[i - 1]!;
+      const cur = path.samples[i]!;
+      expect(cur.position).not.toEqual(prev.position);
+      // The cumulative path length never stalls and never falls.
+      expect(cur.pathLengthMm).toBeGreaterThanOrEqual(prev.pathLengthMm);
+    }
+    // Every Segment of the chain carries samples: Move, Arc, Move.
+    expect(new Set(path.samples.map((s) => s.segmentIndex))).toEqual(new Set([0, 1, 2]));
+    // Total pen travel: Move (0,0), arc of R 10, Move to (16, 0).
+    const chord = Math.hypot(16 - 0, 0);
+    expect(path.totalLengthMm).toBeGreaterThan(chord);
   });
 
   it("accepts a new feed in mm/min and draws with it (converted to mm/s)", () => {
@@ -612,14 +701,15 @@ describe("Project File content", () => {
   });
 
   it("loadProject restores the full drawing state and clears any pending draft", () => {
-    const drafted = click(initialEditorState, 99, 99);
+    let drafted = placeHome(initialEditorState, 0, 0);
+    drafted = click({ ...drafted, tool: "arc", arcMode: "center" }, 99, 99);
     const restored = editorReducer(drafted, { type: "loadProject", content: content() });
     expect(restored.plane).toBe("XZ");
     expect(restored.fixedMm).toBe(4);
     expect(restored.feedMmMin).toBe(600);
     expect(restored.home).toEqual(vec3(1, 4, 2));
     expect(restored.segments).toEqual(content().segments);
-    expect(restored.draftStart).toBeNull();
+    expect(restored.draftCenter).toBeNull();
   });
 
   it("loadProject replaces previous geometry and allows an unset Home Point", () => {

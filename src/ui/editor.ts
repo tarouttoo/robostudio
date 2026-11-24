@@ -4,13 +4,20 @@
  * active tool, the Home Point, and the canonical Segments in draw
  * order. A plain reducer over immutable records — drawn geometry enters
  * the state as canonical Segments built by the core (`point`), never as
- * screen coordinates. Drawing places a chain of Points: every click of
- * the Point tool adds a Point whose Move starts where the previous
+ * screen coordinates. Drawing places one continuous chain: every click
+ * of the Point tool adds a Point whose Move starts where the previous
  * Segment ended (the first at the Home Point), travelling by the
  * selected Motion Type — LIN (по прямой) by default, PTP (в точку) when
- * the toggle says so (ADR 0017). Committed Moves stay editable: the
- * reducer rewrites one Move's Motion Type or Feed, the way the drawing
- * itself is never touched by an edit.
+ * the toggle says so (ADR 0017) — and the Arc tool joins the same
+ * chain: an Arc always starts where the previous Segment ended (the
+ * first at the Home Point), so the radius definition takes one click
+ * (the Arc's end, with the radius from the numeric field) and the
+ * center definition two (center, then end); CW/CCW and the canonical
+ * Arc definition are unchanged (ADR 0005). The chain start is derived,
+ * never stored: editing the Home Point or undoing a Segment re-derives
+ * where the next Move or Arc begins. Committed Moves stay editable:
+ * the reducer rewrites one Move's Motion Type or Feed, the way the
+ * drawing itself is never touched by an edit.
  *
  * Unit conventions follow GLOSSARY.md: the UI works in mm/min (CNC
  * convention), the internal unit is mm/s; conversion happens here, in
@@ -45,10 +52,10 @@ export type { ArcDirection };
 /** How a Move travels (GLOSSARY.md: Motion Type), re-exported for the UI. */
 export type { MotionType };
 
-/** The active drawing tool: Point (one click per chained Point), Arc, or Home Point (one click). */
+/** The active drawing tool: Point (one click per chained Point), Arc (chained), or Home Point (one click). */
 export type EditorTool = "point" | "arc" | "home";
 
-/** How an Arc is defined: radius R (two clicks) or explicit center (three clicks, ADR 0005). */
+/** How an Arc is defined: radius R (one click — the end) or explicit center (two clicks, ADR 0005). */
 export type ArcMode = "radius" | "center";
 
 /** Default Arc radius shown in the UI, in millimetres. */
@@ -79,9 +86,7 @@ export interface EditorState {
   readonly home: Vec3 | null;
   /** Canonical Segments in draw order. */
   readonly segments: readonly Segment[];
-  /** Pending draft start in plane millimetres, or null before the first click. */
-  readonly draftStart: Vec2 | null;
-  /** Pending Arc center in plane millimetres (center mode, after the second click), or null. */
+  /** Pending Arc center in plane millimetres (center mode, after the first click), or null. */
   readonly draftCenter: Vec2 | null;
   /** Readable rejection message of the last failed draw, or null when the last action succeeded. */
   readonly error: string | null;
@@ -114,7 +119,6 @@ export const initialEditorState: EditorState = {
   arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
   home: DEFAULT_HOME_POINT,
   segments: [],
-  draftStart: null,
   draftCenter: null,
   error: null,
 };
@@ -157,12 +161,14 @@ export type DraftPreview =
   /** The pending Move: drawn by its Motion Type from the chain end. */
   | { readonly kind: "move"; readonly motionType: MotionType; readonly start: Vec2 }
   | {
+      /** The pending Arc in the radius definition: R from the numeric field. */
       readonly kind: "arcRadius";
       readonly start: Vec2;
       readonly radiusMm: number;
       readonly direction: ArcDirection;
     }
   | {
+      /** The pending Arc in the center definition: `center` after the first click. */
       readonly kind: "arcCenter";
       readonly start: Vec2;
       readonly center: Vec2 | null;
@@ -172,8 +178,8 @@ export type DraftPreview =
 /**
  * The pen position before the next Segment: the last committed
  * Segment's end, or the Home Point before the first. Null while the
- * Home Point is unset and nothing is drawn — a chained Move then has no
- * start to preview from.
+ * Home Point is unset and nothing is drawn — a chained Move or Arc
+ * then has no start to travel from.
  */
 function chainEndOf(state: EditorState): Vec3 | null {
   const last = state.segments.at(-1);
@@ -181,28 +187,39 @@ function chainEndOf(state: EditorState): Vec3 | null {
   return state.home;
 }
 
+/** Projects the chain end into the plane's (u, v) millimetres, or null. */
+function chainEndUVOf(state: EditorState): Vec2 | null {
+  const pen = chainEndOf(state);
+  if (pen === null) return null;
+  const coords = planeCoords(state.plane, pen);
+  return vec2(coords.u, coords.v);
+}
+
 /** Projects the editor state onto the draft descriptor the canvas draws. */
 export function draftPreviewOf(state: EditorState): DraftPreview | null {
   if (state.tool === "point") {
     // The pending Move: from the chain end (previous Segment's end,
-    // the Home Point first), projected into the plane's millimetres.
-    const pen = chainEndOf(state);
-    if (pen === null) return null;
-    const coords = planeCoords(state.plane, pen);
-    return { kind: "move", motionType: state.motionType, start: vec2(coords.u, coords.v) };
+    // the Home Point first) to the cursor.
+    const start = chainEndUVOf(state);
+    if (start === null) return null;
+    return { kind: "move", motionType: state.motionType, start };
   }
-  if (state.draftStart === null) return null;
   if (state.tool === "arc") {
+    // The pending Arc always previews from the chain end — no click is
+    // needed to start it: in radius mode R and direction ride along,
+    // in center mode the pending center (null before the first click).
+    const start = chainEndUVOf(state);
+    if (start === null) return null;
     return state.arcMode === "radius"
       ? {
           kind: "arcRadius",
-          start: state.draftStart,
+          start,
           radiusMm: state.arcRadiusMm,
           direction: state.arcDirection,
         }
       : {
           kind: "arcCenter",
-          start: state.draftStart,
+          start,
           center: state.draftCenter,
           direction: state.arcDirection,
         };
@@ -241,8 +258,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   switch (action.type) {
     case "setPlane":
       // The fixed value carries over as the new plane's fixed coordinate;
-      // a pending draft started on the old plane is cancelled.
-      return { ...state, plane: action.plane, draftStart: null, draftCenter: null, error: null };
+      // a pending Arc center is cancelled.
+      return { ...state, plane: action.plane, draftCenter: null, error: null };
     case "setFixedMm":
       return { ...state, fixedMm: parseNumberOr(action.raw, state.fixedMm) };
     case "setFeedMmMin":
@@ -255,10 +272,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // edited one by one in the segment list instead.
       return { ...state, motionType: action.motionType };
     case "setTool":
-      return { ...state, tool: action.tool, draftStart: null, draftCenter: null, error: null };
+      return { ...state, tool: action.tool, draftCenter: null, error: null };
     case "setArcMode":
-      // The pending start carries over; a pending center belongs to the
-      // other definition mode and is dropped.
+      // The chain end is always the Arc's start; only a pending center
+      // belongs to the other definition mode and is dropped.
       return { ...state, arcMode: action.mode, draftCenter: null, error: null };
     case "setArcDirection":
       // Direction applies live: a pending draft commits with the new direction.
@@ -311,7 +328,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "cancelDraft":
-      return { ...state, draftStart: null, draftCenter: null, error: null };
+      return { ...state, draftCenter: null, error: null };
     case "undo":
       return { ...state, segments: state.segments.slice(0, -1) };
     case "clear":
@@ -321,7 +338,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         segments: [],
         home: DEFAULT_HOME_POINT,
-        draftStart: null,
         draftCenter: null,
         error: null,
       };
@@ -337,7 +353,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         feedMmMin: action.content.view.feedMmMin,
         home: action.content.home,
         segments: [...action.content.segments],
-        draftStart: null,
         draftCenter: null,
         error: null,
       };
@@ -345,16 +360,26 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 }
 
 /**
- * Advances an Arc draft per the definition mode (ADR 0005): radius mode
- * commits on the second click, center mode on the third. A rejected Arc
- * (impossible for the current radius/center) keeps the draft so the
- * operator can click a valid next point, and stores a readable message.
+ * Advances a chained Arc per the definition mode (ADR 0005): the Arc's
+ * start is always the chain end (the previous Segment's end, the Home
+ * Point first) — radius mode commits on the single click (the Arc's
+ * end, with R from the numeric field), center mode on the second
+ * (center, then end). A rejected Arc (impossible for the current
+ * radius/center, or a chain start off the Working Plane) keeps the
+ * draft so the operator can click a valid next point, and stores a
+ * readable message.
  */
 function arcClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
-  if (state.arcMode === "center") return arcCenterClick(state, uv);
-  if (state.draftStart === null) return { ...state, draftStart: uv, error: null };
-  const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
-  const feed = mmMinToMmS(state.feedMmMin);
+  const start = chainEndOf(state);
+  if (start === null) {
+    return {
+      ...state,
+      error: "Дуга невозможна: нет начала — дуга начинается в конце цепочки или в исходной точке; задайте исходную точку.",
+    };
+  }
+  if (state.arcMode === "center") return arcCenterClick(state, uv, start);
+  // Radius mode: one click — the Arc's end; the start is the chain end.
+  const startUV = chainEndUVOf(state);
   try {
     const segment = arcFromRadius({
       plane: state.plane,
@@ -362,32 +387,37 @@ function arcClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
       end: target,
       radiusMm: state.arcRadiusMm,
       direction: state.arcDirection,
-      feed,
+      feed: mmMinToMmS(state.feedMmMin),
     });
-    return { ...state, segments: [...state.segments, segment], draftStart: null, error: null };
+    return { ...state, segments: [...state.segments, segment], error: null };
   } catch (e) {
     if (!(e instanceof CoreError)) throw e;
-    return { ...state, error: arcRejectMessage(e, state.arcRadiusMm, distance(state.draftStart, uv)) };
+    return {
+      ...state,
+      error: arcRejectMessage(e, state.arcRadiusMm, startUV === null ? 0 : distance(startUV, uv)),
+    };
   }
 }
 
 /**
- * Advances a center-mode Arc draft: click 1 pends the start, click 2 the
- * center (a center on the start is rejected — zero radius), click 3 ends
- * the Arc. The end click may land anywhere except the center: it is
- * snapped onto the circle around the center, so the clicked angle is
- * what defines the Arc (the commit then always passes the core's
- * on-circle check).
+ * Advances a center-mode Arc draft: click 1 pends the center (a center
+ * on the chain end is rejected — zero radius), click 2 ends the Arc.
+ * The end click may land anywhere except the center: it is snapped onto
+ * the circle around the center, so the clicked angle is what defines
+ * the Arc (the commit then always passes the core's on-circle check).
  */
-function arcCenterClick(state: EditorState, uv: Vec2): EditorState {
-  if (state.draftStart === null) return { ...state, draftStart: uv, error: null };
+function arcCenterClick(state: EditorState, uv: Vec2, start: Vec3): EditorState {
+  const startUV = chainEndUVOf(state);
+  if (startUV === null) {
+    return { ...state, error: "Дуга невозможна: нет начала — дуга начинается в конце цепочки или в исходной точке; задайте исходную точку." };
+  }
   if (state.draftCenter === null) {
-    if (distance(state.draftStart, uv) <= CENTER_EPS_MM) {
+    if (distance(startUV, uv) <= CENTER_EPS_MM) {
       return { ...state, error: "Дуга невозможна: центр совпал с началом — кликните рядом с началом дуги." };
     }
     return { ...state, draftCenter: uv, error: null };
   }
-  const radiusMm = distance(state.draftStart, state.draftCenter);
+  const radiusMm = distance(startUV, state.draftCenter);
   const offset = distance(uv, state.draftCenter);
   if (offset <= CENTER_EPS_MM) {
     return { ...state, error: "Дуга невозможна: конец попал в центр — кликните на окружности дуги." };
@@ -400,7 +430,7 @@ function arcCenterClick(state: EditorState, uv: Vec2): EditorState {
   try {
     const segment = arcFromCenter({
       plane: state.plane,
-      start: at(state.draftStart),
+      start,
       end: at(end2),
       center: at(state.draftCenter),
       direction: state.arcDirection,
@@ -409,7 +439,6 @@ function arcCenterClick(state: EditorState, uv: Vec2): EditorState {
     return {
       ...state,
       segments: [...state.segments, segment],
-      draftStart: null,
       draftCenter: null,
       error: null,
     };
@@ -421,10 +450,11 @@ function arcCenterClick(state: EditorState, uv: Vec2): EditorState {
 
 /**
  * A readable Russian rejection for an Arc the core refused, with the
- * numbers that matter. Through the UI only the two radius-mode tags can
- * actually fire (the center-mode end click is snapped onto the circle,
- * and every point is built on one plane's fixed coordinate); anything
- * else falls back to the core's own message.
+ * numbers that matter. Through the UI the radius-mode tags and the
+ * off-plane chain start can actually fire (the center-mode end click is
+ * snapped onto the circle, and every point is built on one plane's
+ * fixed coordinate); anything else falls back to the core's own
+ * message.
  */
 function arcRejectMessage(error: CoreError, radiusMm: number, chordMm: number): string {
   switch (error.tag) {
@@ -432,6 +462,8 @@ function arcRejectMessage(error: CoreError, radiusMm: number, chordMm: number): 
       return `Дуга невозможна: концы дальше, чем диаметр 2·R = ${(2 * radiusMm).toFixed(1)} мм (расстояние ${chordMm.toFixed(1)} мм), увеличьте радиус.`;
     case "ArcAmbiguousCenter":
       return "Дуга невозможна: концы совпадают — по радиусу центр не определить.";
+    case "ArcOffPlane":
+      return "Дуга невозможна: начало цепочки лежит вне текущей рабочей плоскости — дуга всегда целиком в рабочей плоскости; верните плоскость или задайте новую исходную точку.";
     default:
       return `Дуга невозможна: ${error.message}`;
   }

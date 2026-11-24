@@ -57,8 +57,9 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * Move, chaining from the previous Segment's end (the first from
  * the Home Point) — chooses the Motion Type the next Move travels by
  * (LIN по прямой, the default, or PTP в точку), edits each committed
- * Move's Motion Type and Feed in the segment list, draws Arcs (R or
- * center, CW/CCW), sets the Home Point, and can undo or clear.
+ * Move's Motion Type and Feed in the segment list, draws chained Arcs
+ * (always starting where the chain stands — R or center, CW/CCW, one
+ * or two clicks), sets the Home Point, and can undo or clear.
  * Impossible Arcs are rejected at draw time with a readable message;
  * Reachability of a pending Move is checked by its Motion Type — LIN
  * along the drawn line, PTP at its target only. Drawn geometry is
@@ -177,17 +178,15 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const draftViolation = useMemo<ReachabilityViolation | null>(() => {
     if (cursor === null) return null;
     const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
-    if (state.tool === "point") {
-      if (state.motionType === "PTP") {
-        return checkPointViolation(MIKO_MINI, [end.x, end.y, end.z]);
-      }
-      const draft = draftPreviewOf(state);
-      if (draft === null || draft.kind !== "move") return null;
-      const start = planePoint(state.plane, draft.start.x, draft.start.y, state.fixedMm);
-      return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
+    if (state.tool === "point" && state.motionType === "PTP") {
+      return checkPointViolation(MIKO_MINI, [end.x, end.y, end.z]);
     }
-    if (state.draftStart === null) return null;
-    const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
+    // The pending draft is checked along the straight line from the
+    // chain end (the pending Move's line, or the chord approximating
+    // the pending Arc) to the cursor.
+    const draft = draftPreviewOf(state);
+    if (draft === null) return null;
+    const start = planePoint(state.plane, draft.start.x, draft.start.y, state.fixedMm);
     return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
   }, [state, cursor]);
 
@@ -245,7 +244,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
             {(
               [
                 { tool: "point" as EditorTool, label: "Точка", hint: "клик — точка в цепочке" },
-                { tool: "arc" as EditorTool, label: "Дуга", hint: "2–3 клика" },
+                { tool: "arc" as EditorTool, label: "Дуга", hint: "1–2 клика, продолжается с конца цепочки" },
                 { tool: "home" as EditorTool, label: "Исходная точка", hint: "один клик" },
               ]
             ).map(({ tool, label, hint }) => (
@@ -288,7 +287,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                     checked={state.arcMode === "radius"}
                     onChange={() => dispatch({ type: "setArcMode", mode: "radius" as ArcMode })}
                   />
-                  Радиус R <span style={{ color: "#888" }}>(2 клика)</span>
+                  Радиус R <span style={{ color: "#888" }}>(1 клик — конец дуги)</span>
                 </label>
                 <label style={rowStyle}>
                   <input
@@ -298,7 +297,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                     checked={state.arcMode === "center"}
                     onChange={() => dispatch({ type: "setArcMode", mode: "center" as ArcMode })}
                   />
-                  Центр <span style={{ color: "#888" }}>(3 клика)</span>
+                  Центр <span style={{ color: "#888" }}>(2 клика: центр, потом конец)</span>
                 </label>
                 <label style={rowStyle}>
                   <input
