@@ -24,6 +24,11 @@ humans and coding agents edit both the product code and the pipeline code.
 
 ## Constraints
 
+- Non-trivial changes ride the pipeline: publish a Spec issue first, break
+  it into child Tickets, and let the `agent:*` label flow implement and
+  review them. Direct one-shot edits in the working tree are the exception
+  — agree it with the operator before starting. Every change request is
+  assessed for this each time, not assumed.
 - Pipeline files (`.sandcastle/agent-workflows/`, `.github/workflows/`)
   are ours to change: the verbatim-port constraint was removed by ADR 0019,
   and the course / upstream sandcastle are references, not authorities.
