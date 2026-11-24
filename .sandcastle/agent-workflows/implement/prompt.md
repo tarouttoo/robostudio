@@ -16,6 +16,17 @@ If a parent spec is shown above, it is background: it explains why this
 Ticket exists and what it is part of. Implement only issue #{{ISSUE_NUMBER}}
 — never the spec itself or its other Tickets.
 
+# EXPLORATION NOTES
+
+{{NOTES}}
+
+If a branch name is shown above, the Spec's exploration notes live on it:
+run `git fetch origin <branch>` and read the notes in `notes/` — they are
+the shared context for this Spec's Tickets (approach, decisions, files,
+pitfalls). They may be missing or stale: your own reading of the repo and
+the issue wins. If no branch is named, work from the issue and the spec
+alone.
+
 # CONTEXT
 
 Read the project's domain and architecture docs before changing code:

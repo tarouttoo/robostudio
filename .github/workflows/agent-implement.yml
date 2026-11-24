@@ -29,6 +29,11 @@ jobs:
       AGENT_MODEL: glm-5.3-flash:max
 
     steps:
+      # Route by issue shape (ADR 0019, delta №1): a Spec with Tickets goes
+      # to the exploration-notes runner; a Spec marked `spec` without
+      # Tickets goes to the to-tickets runner (AFK decomposition); an issue
+      # without sub-issues implements (its parent Spec, if any, is pulled
+      # in as context).
       - name: Detect issue shape
         id: shape
         run: |
@@ -40,27 +45,20 @@ jobs:
             -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
             -f owner="$owner" -f repo="$repo" -F num="$ISSUE_NUMBER" \
             --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
-          # A child-of-spec Ticket (parent_number set) proceeds; only a
-          # PRD-shaped issue (sub-issues of its own) is refused. The parent
-          # number is exported so the implement pass can pull the parent spec
-          # in as context.
+          has_spec_label=$(gh issue view "$ISSUE_NUMBER" --json labels --jq 'any(.labels[]; .name == "spec")')
           if [ "$sub_count" != "0" ]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            route="spec-explore"
+          elif [ "$has_spec_label" = "true" ]; then
+            route="to-tickets"
           else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            route="implement"
           fi
           echo "sub_count=$sub_count" >> "$GITHUB_OUTPUT"
           echo "parent_number=$parent_number" >> "$GITHUB_OUTPUT"
-
-      - name: Refuse PRD-shaped issue
-        if: steps.shape.outputs.sub_count != '0'
-        run: |
-          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
-          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
-          gh issue comment "$ISSUE_NUMBER" --body "Refused to run: issue #${ISSUE_NUMBER} has sub-issues of its own, but only Tickets (issues without sub-issues) are implemented. Label its sub-issue Tickets instead."
+          echo "route=$route" >> "$GITHUB_OUTPUT"
 
       - name: Preflight existing PR
-        if: steps.shape.outputs.proceed == 'true'
+        if: steps.shape.outputs.route == 'implement'
         id: preflight
         run: |
           set -euo pipefail
@@ -85,7 +83,7 @@ jobs:
           echo "existing_pr_url=$existing_pr_url" >> "$GITHUB_OUTPUT"
 
       - name: Refuse existing PR
-        if: steps.preflight.outputs.refused == 'true'
+        if: steps.shape.outputs.route == 'implement' && steps.preflight.outputs.refused == 'true'
         env:
           EXISTING_PR_URL: ${{ steps.preflight.outputs.existing_pr_url }}
         run: |
@@ -93,22 +91,36 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --body "Refused to run: $EXISTING_PR_URL already targets this issue. Close it first, then re-add \`agent:implement\`."
 
       - name: Transition labels
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.preflight.outputs.refused != 'true'
         run: |
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" || true
           gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress"
 
       - name: Checkout main
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.preflight.outputs.refused != 'true'
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
 
+      - name: Setup Node.js
+        if: steps.preflight.outputs.refused != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        if: steps.preflight.outputs.refused != 'true'
+        run: npm ci
+
+      - name: Install pi CLI
+        if: steps.preflight.outputs.refused != 'true'
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
       - name: Compute branch name
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.shape.outputs.route == 'implement'
         id: branch
         run: |
           slug=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50)
@@ -116,7 +128,7 @@ jobs:
           echo "name=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Create branch
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.shape.outputs.route == 'implement'
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
         run: |
@@ -124,30 +136,51 @@ jobs:
           git config user.email "sandcastle-agent[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
-      - name: Setup Node.js
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        run: npm ci
-
-      - name: Install pi CLI
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-
       # The evidence prompt has the agent screenshot the UI; Electron needs a
-      # display even headless, hence xvfb (ADR 0014).
+      # display even headless, hence xvfb (ADR 0014). The spec routes don't
+      # capture evidence.
       - name: Install xvfb for UI evidence
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.shape.outputs.route == 'implement'
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
 
+      - name: Run to-tickets runner
+        if: steps.shape.outputs.route == 'to-tickets'
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          OUTPUT_DIR: ${{ runner.temp }}
+        run: npx tsx .sandcastle/agent-workflows/to-tickets/to-tickets.ts
+
+      - name: Run spec-explore runner
+        if: steps.shape.outputs.route == 'spec-explore'
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          OUTPUT_DIR: ${{ runner.temp }}
+        run: npx tsx .sandcastle/agent-workflows/spec-explore/spec-explore.ts
+
+      - name: Push notes branch
+        if: steps.shape.outputs.route == 'spec-explore' && success()
+        run: |
+          notes_branch="agent/spec-${ISSUE_NUMBER}-notes"
+          git push --force origin "$notes_branch"
+
+      - name: Post exploration comment
+        if: steps.shape.outputs.route == 'spec-explore' && success()
+        run: |
+          notes_branch="agent/spec-${ISSUE_NUMBER}-notes"
+          comment_file="${RUNNER_TEMP}/exploration-comment.md"
+          cat > "$comment_file" <<EOF
+          <!-- exploration-notes: $notes_branch -->
+          Exploration notes saved on branch \`$notes_branch\` (see \`notes/\` there).
+
+          Implement runners for this Spec's Tickets: \`git fetch origin $notes_branch\` and read the notes for shared context before implementing. The Tickets themselves flow through the converter as blockers close.
+          EOF
+          gh issue comment "$ISSUE_NUMBER" --body-file "$comment_file"
+
       - name: Run implementation agent
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: steps.shape.outputs.route == 'implement'
         env:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -156,7 +189,7 @@ jobs:
         run: npx tsx .sandcastle/agent-workflows/implement/implement.ts
 
       - name: Upload evidence screenshots
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        if: steps.shape.outputs.route == 'implement' && success()
         uses: actions/upload-artifact@v4
         with:
           name: evidence-issue-${{ github.event.issue.number }}
@@ -164,13 +197,13 @@ jobs:
           if-no-files-found: ignore
 
       - name: Push branch
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        if: steps.shape.outputs.route == 'implement' && success()
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
         run: git push --force origin "$BRANCH"
 
       - name: Open draft PR
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        if: steps.shape.outputs.route == 'implement' && success()
         id: open_pr
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -190,7 +223,7 @@ jobs:
           echo "pr_number=$(basename "$pr_url")" >> "$GITHUB_OUTPUT"
 
       - name: Request automated review
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        if: steps.shape.outputs.route == 'implement' && success()
         env:
           PR_NUMBER: ${{ steps.open_pr.outputs.pr_number }}
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
@@ -207,7 +240,7 @@ jobs:
           GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "agent:review"
 
       - name: Mark blocked on failure
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
+        if: failure() && steps.preflight.outputs.refused != 'true'
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -221,5 +254,5 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --body-file "$body_file"
 
       - name: Always remove in-progress
-        if: always() && steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        if: always() && steps.preflight.outputs.refused != 'true'
         run: gh issue edit "$ISSUE_NUMBER" --remove-label "agent:in-progress" || true

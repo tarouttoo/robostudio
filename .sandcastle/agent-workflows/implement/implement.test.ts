@@ -17,19 +17,36 @@ const script = readFileSync(path.join(import.meta.dirname, "implement.ts"), "utf
 const prompt = readFileSync(path.join(import.meta.dirname, "prompt.md"), "utf8");
 
 describe("implement preflight (Detect issue shape)", () => {
-  it("does not refuse an issue for having a parent", () => {
-    expect(workflow).not.toContain("Refuse sub-issue");
-    expect(workflow).not.toContain('elif [ -n "$parent_number" ]');
+  it("routes by issue shape instead of refusing PRD-shaped issues (ADR 0019, delta №1)", () => {
+    expect(workflow).not.toContain("Refuse PRD-shaped issue");
+    const shapeStep = workflow.slice(
+      workflow.indexOf("Detect issue shape"),
+      workflow.indexOf("Preflight existing PR"),
+    );
+    expect(shapeStep).toContain('route="spec-explore"');
+    expect(shapeStep).toContain('route="to-tickets"');
+    expect(shapeStep).toContain('route="implement"');
+    expect(shapeStep).toContain('== "spec"');
   });
 
-  it("still refuses a PRD-shaped issue, with the same blocked treatment", () => {
-    expect(workflow).toContain("Refuse PRD-shaped issue");
-    expect(workflow).toContain(
-      "if: steps.shape.outputs.sub_count != '0'",
-    );
-    expect(workflow).toContain(
-      '--body "Refused to run: issue #${ISSUE_NUMBER} has sub-issues',
-    );
+  it("keeps the spec-explore route out of the implement pass", () => {
+    const runStep = workflow.slice(workflow.indexOf("Run implementation agent"));
+    const stepBody = runStep.slice(0, runStep.indexOf("- name:", 1));
+    expect(stepBody).toContain("steps.shape.outputs.route == 'implement'");
+  });
+
+  it("runs the spec routes as their own steps", () => {
+    expect(workflow).toContain("to-tickets/to-tickets.ts");
+    expect(workflow).toContain("spec-explore/spec-explore.ts");
+    const toTickets = workflow.slice(workflow.indexOf("Run to-tickets runner"));
+    const stepBody = toTickets.slice(0, toTickets.indexOf("- name:", 1));
+    expect(stepBody).toContain("steps.shape.outputs.route == 'to-tickets'");
+    expect(stepBody).toContain("AGENT_PAT: ${{ secrets.AGENT_PAT }}");
+  });
+
+  it("posts the exploration comment with the marker implement runners look up", () => {
+    expect(workflow).toContain("exploration-notes:");
+    expect(workflow).toContain("agent/spec-${ISSUE_NUMBER}-notes");
   });
 
   it("emits the parent_number output the implement step consumes", () => {
@@ -37,7 +54,7 @@ describe("implement preflight (Detect issue shape)", () => {
     // child-of-spec Ticket silently runs without its parent spec.
     const shapeStep = workflow.slice(
       workflow.indexOf("Detect issue shape"),
-      workflow.indexOf("- name: Refuse PRD-shaped issue"),
+      workflow.indexOf("Preflight existing PR"),
     );
     expect(shapeStep).toContain(
       'echo "parent_number=$parent_number" >> "$GITHUB_OUTPUT"',
@@ -51,6 +68,15 @@ describe("implement preflight (Detect issue shape)", () => {
       "PARENT_NUMBER: ${{ steps.shape.outputs.parent_number }}",
     );
   });
+
+  it("keeps the classic refusal of an open collaborator PR (implement route only)", () => {
+    expect(workflow).toContain("Refuse existing PR");
+    const preflight = workflow.slice(
+      workflow.indexOf("Preflight existing PR"),
+      workflow.indexOf("Transition labels"),
+    );
+    expect(preflight).toContain("steps.shape.outputs.route == 'implement'");
+  });
 });
 
 describe("implement pass parent context", () => {
@@ -61,5 +87,10 @@ describe("implement pass parent context", () => {
 
   it("renders {{PARENT_CONTEXT}} into the prompt", () => {
     expect(prompt).toContain("{{PARENT_CONTEXT}}");
+  });
+
+  it("hands the exploration-notes branch to the prompt", () => {
+    expect(script).toContain("exploration-notes:");
+    expect(prompt).toContain("{{NOTES}}");
   });
 });

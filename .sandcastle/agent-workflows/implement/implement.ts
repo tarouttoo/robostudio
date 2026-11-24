@@ -25,6 +25,28 @@ try {
     (number) => safeSh(`gh issue view ${number} --json body --jq .body`),
   );
 
+  /**
+   * The parent Spec's exploration-notes branch, taken from the Spec's
+   * latest exploration comment (posted by the spec-explore runner — ADR
+   * 0019). Empty when the parent has none: notes are optional context,
+   * never a prerequisite (the converter may start a ticket before its
+   * Spec's exploration has run).
+   */
+  const notesBranch = (): string => {
+    const parent = parseParentNumber(PARENT_NUMBER);
+    if (!parent) return "";
+    const marker = `exploration-notes: agent/spec-${parent}-notes`;
+    const comments = safeSh(
+      `gh api repos/{owner}/{repo}/issues/${parent}/comments --paginate --jq .[].body`,
+    );
+    const lines = comments
+      .split("\n")
+      .filter((line) => line.includes(marker))
+      .map((line) => line.trim());
+    return lines.at(-1) ?? "";
+  };
+  const NOTES = notesBranch();
+
   const result = await sandcastle.run({
     name: `implement-#${ISSUE_NUMBER}`,
     agent: agentFromEnv(),
@@ -37,6 +59,7 @@ try {
       BRANCH,
       ISSUE_CONTEXT: issueContext,
       PARENT_CONTEXT: parentContext,
+      NOTES,
       PR_BODY_PATH,
     },
   });
