@@ -4,7 +4,10 @@ import {
   type ChainJointConfig,
   type GenericChainRobotConfig,
 } from "./generic-chain";
-import { DEFAULT_MIKO_MINI_CONFIG } from "./miko-mini";
+import {
+  DEFAULT_MIKO_MINI_CONFIG,
+  type MiKoMiniRobotConfig,
+} from "./miko-mini";
 import { createRobotRegistry, type RobotModelConfig } from "./registry";
 import {
   vec3Distance,
@@ -43,10 +46,24 @@ const ONE_JOINT_CHAIN: GenericChainRobotConfig = {
 function mikoChainJoints(): ChainJointConfig[] {
   return DEFAULT_MIKO_MINI_CONFIG.joints.map((joint, i) => ({
     ...joint,
-    origin: i === 0 ? [0, 0, 60] : [0, 0, 0],
+    origin: i === 0 ? [0, 0, 160] : [0, 0, 0],
     axis: i === 0 ? [0, 0, 1] : [0, -1, 0],
-    offset: i === 0 ? [0, 0, 0] : [90, 0, 0],
+    offset: i === 0 ? [0, 0, 0] : [159.8045, 0, 0],
   }));
+}
+
+/**
+ * The analytic config the MiKo-shaped chain mirrors exactly: the 53 mm
+ * tool of the default model is a radial offset that only the analytic
+ * solver models (ADR 0015) — a generic chain carries rigid link offsets
+ * only — so the cross-check pairs the chain against the toolless
+ * variant of the same measured links.
+ */
+export function mikoShapedAnalyticConfig(): MiKoMiniRobotConfig {
+  return {
+    ...DEFAULT_MIKO_MINI_CONFIG,
+    geometry: { baseHeightMm: 160, upperArmMm: 159.8045, forearmMm: 159.8045, toolOffsetMm: 0 },
+  };
 }
 
 /** A generic-chain config describing the exact MiKo-mini geometry. */
@@ -118,7 +135,7 @@ describe("generic-chain forward kinematics", () => {
   });
 
   it("matches the analytic MiKo-mini FK when the chain describes the same geometry", () => {
-    const analytic = resolveModel(DEFAULT_MIKO_MINI_CONFIG);
+    const analytic = resolveModel(mikoShapedAnalyticConfig());
     const generic = resolveModel(mikoShapedChainConfig());
 
     const poses: readonly (readonly number[])[] = [
@@ -210,47 +227,74 @@ describe("generic-chain IK named failure statuses", () => {
   const model = resolveModel(mikoShapedChainConfig());
 
   it("reports unreachable for a point beyond the outer reach", () => {
-    expect(model.inverseKinematics([500, 0, 60])).toEqual({ status: "unreachable" });
+    expect(model.inverseKinematics([500, 0, 160])).toEqual({ status: "unreachable" });
   });
 
   it("reports unreachable for a point below the folded reach", () => {
     expect(model.inverseKinematics([0, 0, -200])).toEqual({ status: "unreachable" });
   });
 
-  it("reports angle-limit naming a genuinely violated joint for a target needing q2 past its max", () => {
-    // Straight above the base: several out-of-limits solutions exist
-    // (e.g. the analytic shoulder-up q2 ≈ 129° > +105°, or a mirrored
-    // pose violating q3); which branch the numeric descent finds depends
-    // on its deterministic seeds, so assert status plus a genuine named
-    // violation rather than a specific joint.
-    const result = model.inverseKinematics([0, 0, 200]);
-    if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
-    const limit = model.joints.find((joint) => joint.name === result.joint);
-    if (!limit) throw new Error(`angle-limit names unknown joint ${result.joint}`);
-    expect(result.bound === "max" ? result.valueRad > limit.maxRad : result.valueRad < limit.minRad).toBe(true);
-  });
-
-  it("reports angle-limit naming the joint for a target needing q2 below its min", () => {
-    // The shoulder-up pose needs q2 ≈ −21.6° < −15°.
-    const result = model.inverseKinematics([60, 0, -60]);
-    if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
-    expect(result.joint).toBe("q2");
-    expect(result.bound).toBe("min");
-    expect(result.valueRad).toBeLessThan(model.joints[1]?.minRad ?? Number.NaN);
+  it("solves a target folded behind the base within the symmetric ±π limits", () => {
+    // With every joint limited to [−π, π], the mirror (elbow-down) pose
+    // of a behind-the-base target fits the limits and the descent finds it.
+    const result = model.inverseKinematics([40, 0, 170]);
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expectConverges(model, [40, 0, 170]);
   });
 
   it("never throws and never returns ok for garbage coordinates", () => {
-    expect(model.inverseKinematics([Number.NaN, 0, 60]).status).toBe("unreachable");
+    expect(model.inverseKinematics([Number.NaN, 0, 160]).status).toBe("unreachable");
     const probes: readonly (readonly number[])[] = [
       [0, 0, 0],
       [-500, -500, -500],
-      [60, 0, -60],
-      [Number.POSITIVE_INFINITY, 0, 60],
+      [40, 0, 170],
+      [Number.POSITIVE_INFINITY, 0, 160],
     ];
     for (const target of probes) {
       const status = model.inverseKinematics(target as [number, number, number]).status;
       expect(["ok", "unreachable", "angle-limit"]).toContain(status);
     }
+  });
+});
+
+describe("generic-chain IK angle-limit classification on narrowed limits", () => {
+  // The default limits span a full turn, so a converged pose can always
+  // be wrapped into them; narrowing the ranges makes the numeric solver
+  // classify out-of-range poses as angle-limit failures. Which of the
+  // position-equivalent poses (a revolute joint may wind extra turns)
+  // the descent lands in depends on its deterministic seeds, so assert
+  // status plus a genuine named violation rather than a specific joint.
+  function narrowed(id: string): RobotModel {
+    const joints = mikoChainJoints().map((joint, i) =>
+      i === 1
+        ? { ...joint, minRad: -(Math.PI / 12), maxRad: (7 * Math.PI) / 12 } // −15°…+105°
+        : i === 2
+          ? { ...joint, minRad: -((5 * Math.PI) / 6), maxRad: 0 } // −150°…0
+          : joint,
+    );
+    return resolveModel({ ...mikoShapedChainConfig(id), joints });
+  }
+
+  function expectGenuineViolation(model: RobotModel, target: Vec3): void {
+    const result = model.inverseKinematics(target);
+    if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
+    const limit = model.joints.find((joint) => joint.name === result.joint);
+    if (!limit) throw new Error(`angle-limit names unknown joint ${result.joint}`);
+    expect(
+      result.bound === "max" ? result.valueRad > limit.maxRad : result.valueRad < limit.minRad,
+    ).toBe(true);
+  }
+
+  it("reports angle-limit for a deep folded target below the shoulder", () => {
+    // On the base axis below the shoulder the planar pair folds to poses
+    // outside the narrowed q2 range.
+    expectGenuineViolation(narrowed("narrow-low"), [0, 0, 60]);
+  });
+
+  it("reports angle-limit for a target behind the base above the shoulder", () => {
+    // Radial 23.8 mm (behind the base axis) at z = 455 mm: the pose the
+    // descent finds exceeds the narrowed elbow range.
+    expectGenuineViolation(narrowed("narrow-high"), [23.8, 0, 455]);
   });
 });
 
@@ -312,7 +356,7 @@ describe("generic-chain convergence configuration", () => {
 
 describe("generic-chain cross-check against the analytic MiKo-mini solver", () => {
   function resolved(id: string): RobotModel {
-    const registryResult = createRobotRegistry([DEFAULT_MIKO_MINI_CONFIG, mikoShapedChainConfig()]);
+    const registryResult = createRobotRegistry([mikoShapedAnalyticConfig(), mikoShapedChainConfig()]);
     if (registryResult.status !== "ok") throw new Error(`registry failed: ${registryResult.problems.join("; ")}`);
     const model = registryResult.registry.resolve(id);
     if (!model) throw new Error(`model ${id} was not resolved`);
@@ -366,8 +410,8 @@ describe("generic-chain cross-check against the analytic MiKo-mini solver", () =
   it("agrees with the analytic solver on failure statuses off the workspace", () => {
     expectAgreement([500, 0, 60]); // beyond the outer reach
     expectAgreement([0, 0, -200]); // below the folded reach
-    expectAgreement([60, 0, -60]); // reachable, but the pose violates q2 min
-    expectAgreement([0, 0, 200]); // reachable, but the pose violates q2 max
+    expectAgreement([40, 0, 170]); // behind the base, above the shoulder: still in-range
+    expectAgreement([0, 0, 200]); // straight above the base: still in-range
   });
 });
 

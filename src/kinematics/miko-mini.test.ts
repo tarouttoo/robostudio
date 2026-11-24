@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_MIKO_MINI_CONFIG } from "./miko-mini";
+import { DEFAULT_MIKO_MINI_CONFIG, DEFAULT_MIKO_MINI_HOME_MM } from "./miko-mini";
 import { createRobotRegistry } from "./registry";
 import type { IKResult, JointConfig, RobotModel } from "./robot-model";
 
@@ -38,28 +38,44 @@ function expectRoundTrip(model: RobotModel, q: readonly number[]): void {
 describe("MiKo-mini forward kinematics", () => {
   const model = defaultModel();
 
-  // Reference points computed by hand from the documented chain formulas:
-  //   r = L1·cos(q2) + L2·cos(q2+q3), z = h + L1·sin(q2) + L2·sin(q2+q3)
-  // with h = 60, L1 = L2 = 90.
+  // Reference points computed by hand from the documented chain formulas
+  // (ADR 0015):
+  //   r = L1·cos(q2) + L2·cos(q2+q3) + tool,
+  //   z = h + L1·sin(q2) + L2·sin(q2+q3)
+  // with h = 160, L1 = L2 = 159.8045, tool = 53.
   const references: readonly { readonly q: readonly number[]; readonly expected: readonly [number, number, number] }[] = [
-    { q: [0, 0, 0], expected: [180, 0, 60] },
-    { q: [Math.PI / 2, 0, 0], expected: [0, 180, 60] },
-    { q: [0, Math.PI / 2, -Math.PI / 2], expected: [90, 0, 150] },
-    { q: [0, Math.PI / 4, -Math.PI / 2], expected: [90 * Math.SQRT2, 0, 60] },
+    // Fully extended forward: two links plus the 53 mm tool offset.
+    { q: [0, 0, 0], expected: [2 * 159.8045 + 53, 0, 160] },
+    { q: [Math.PI / 2, 0, 0], expected: [0, 2 * 159.8045 + 53, 160] },
+    // Upper arm vertical, forearm horizontal: the tool extends the radial term.
+    { q: [0, Math.PI / 2, -Math.PI / 2], expected: [159.8045 + 53, 0, 160 + 159.8045] },
+    // The two horizontal contributions add up: 2·L·cos(45°) plus the tool.
+    { q: [0, Math.PI / 4, -Math.PI / 2], expected: [2 * 159.8045 * (Math.sqrt(2) / 2) + 53, 0, 160] },
+    // Folded back over the base at q1 = π: the radial term is the 53 mm
+    // tool minus the folded link reach, and cos(q1) mirrors it to −x.
     {
       q: [Math.PI, -Math.PI / 6, -((5 * Math.PI) / 6)],
-      expected: [90 - 90 * (Math.sqrt(3) / 2), 0, 15], // cos(π)·r folds the negative reach to +x
+      expected: [-(53 - 159.8045 * (1 - Math.sqrt(3) / 2)), 0, 160 - 159.8045 / 2],
     },
   ];
 
   for (const { q, expected } of references) {
-    it(`matches the prototype formula at q = (${q.map((a) => a.toFixed(2)).join(", ")})`, () => {
+    it(`matches the prototype chain at q = (${q.map((a) => a.toFixed(2)).join(", ")})`, () => {
       const p = model.forwardKinematics(q);
       expect(p[0]).toBeCloseTo(expected[0], 9);
       expect(p[1]).toBeCloseTo(expected[1], 9);
       expect(p[2]).toBeCloseTo(expected[2], 9);
     });
   }
+
+  it("places the 53 mm tool offset along the forearm's radial direction (ADR 0015)", () => {
+    // At q2 = π/2, q3 = −π/2 the wrist sits straight above the shoulder;
+    // the tool adds 53 mm exactly when the TCP moves horizontally out.
+    const p = model.forwardKinematics([0, Math.PI / 2, -Math.PI / 2]);
+    expect(p[0]).toBeCloseTo(159.8045 + 53, 9);
+    // Removing the offset from the radial term must recover the bare wrist.
+    expect(p[0] - 53).toBeCloseTo(159.8045, 9);
+  });
 });
 
 describe("MiKo-mini inverse kinematics", () => {
@@ -98,13 +114,28 @@ describe("MiKo-mini inverse kinematics", () => {
       }
     }
   });
+
+  it("solves the default Home Point [213, 0, 305] on the shoulder-up branch", () => {
+    const solved = expectOk(model.inverseKinematics(DEFAULT_MIKO_MINI_HOME_MM));
+    expectWithinLimits(model, solved);
+    // q1 = atan2(0, 213) = 0; the wrist sits at radial 160 mm, height 145 mm
+    // above the 160 mm shoulder, so the planar pair solves to q2 ≈ 1.5653,
+    // q3 ≈ −1.6580 (hand-computed from the law of cosines).
+    expect(solved[0]).toBeCloseTo(0, 9);
+    expect(solved[1]).toBeCloseTo(1.5653, 4);
+    expect(solved[2]).toBeCloseTo(-1.658, 4);
+    const achieved = model.forwardKinematics(solved);
+    expect(achieved[0]).toBeCloseTo(213, 9);
+    expect(achieved[1]).toBeCloseTo(0, 9);
+    expect(achieved[2]).toBeCloseTo(305, 9);
+  });
 });
 
 describe("MiKo-mini IK named failure statuses", () => {
   const model = defaultModel();
 
   it("reports unreachable for points beyond the outer reach", () => {
-    expect(model.inverseKinematics([500, 0, 60])).toEqual({ status: "unreachable" });
+    expect(model.inverseKinematics([500, 0, 160])).toEqual({ status: "unreachable" });
   });
 
   it("reports unreachable for points below the folded reach", () => {
@@ -112,27 +143,28 @@ describe("MiKo-mini IK named failure statuses", () => {
   });
 
   it("accepts a point exactly on the workspace boundary", () => {
-    // 180 mm straight ahead: the fully-extended arm, cos(q3) = 1 exactly.
-    const solved = expectOk(model.inverseKinematics([180, 0, 60]));
+    // Fully extended straight ahead: cos(q3) = 1 exactly.
+    const solved = expectOk(model.inverseKinematics([2 * 159.8045 + 53, 0, 160]));
     expect(solved[2]).toBeCloseTo(0, 9);
   });
 
   it("reports angle-limit naming the joint for a limit-violating solution", () => {
-    // Shoulder-up solution needs q2 ≈ −0.377 rad, below the q2 min of −15°.
-    const result = model.inverseKinematics([60, 0, -60]);
+    // Behind the base axis above the shoulder, the shoulder-up fold needs
+    // q2 past +π (≈ 4.005 rad); the elbow-down mirror is not taken.
+    const result = model.inverseKinematics([40, 0, 170]);
     if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
     expect(result.joint).toBe("q2");
-    expect(result.bound).toBe("min");
-    expect(result.valueRad).toBeLessThan(model.joints[1]?.minRad ?? Number.NaN);
+    expect(result.bound).toBe("max");
+    expect(result.valueRad).toBeGreaterThan(Math.PI);
   });
 
   it("never throws and never returns ok for garbage coordinates", () => {
-    expect(model.inverseKinematics([Number.NaN, 0, 60]).status).toBe("unreachable");
+    expect(model.inverseKinematics([Number.NaN, 0, 160]).status).toBe("unreachable");
     const probes: readonly (readonly number[])[] = [
       [0, 0, 0],
       [-500, -500, -500],
-      [60, 0, -60],
-      [Number.POSITIVE_INFINITY, 0, 60],
+      [40, 0, 170],
+      [Number.POSITIVE_INFINITY, 0, 160],
     ];
     for (const target of probes) {
       const status = model.inverseKinematics(target as [number, number, number]).status;
@@ -141,50 +173,57 @@ describe("MiKo-mini IK named failure statuses", () => {
   });
 });
 
-describe("MiKo-mini carried constants", () => {
-  it("pins the prototype geometry and joint/dynamic limits as configuration", () => {
+describe("MiKo-mini measured constants (ADR 0015)", () => {
+  it("pins the prototype geometry, joint limits, and dynamic limits as configuration", () => {
     expect(DEFAULT_MIKO_MINI_CONFIG.kind).toBe("miko-mini");
     expect(DEFAULT_MIKO_MINI_CONFIG.id).toBe("miko-mini");
     expect(DEFAULT_MIKO_MINI_CONFIG.name).toBe("MiKo-mini");
+    // Measured values are not rounded (ADR 0015): 159.8045 came from measurement.
     expect(DEFAULT_MIKO_MINI_CONFIG.geometry).toEqual({
-      baseHeightMm: 60,
-      upperArmMm: 90,
-      forearmMm: 90,
+      baseHeightMm: 160,
+      upperArmMm: 159.8045,
+      forearmMm: 159.8045,
+      toolOffsetMm: 53,
     });
     expect(DEFAULT_MIKO_MINI_CONFIG.joints).toEqual([
       {
         name: "q1",
         minRad: -Math.PI,
         maxRad: Math.PI,
-        maxVelocityRadS: 1.0,
-        maxAccelerationRadS2: 5.0,
-        maxJerkRadS3: 25.0,
+        maxVelocityRadS: 1.2,
+        maxAccelerationRadS2: 2.8,
+        maxJerkRadS3: 9.0,
       },
       {
         name: "q2",
-        minRad: -0.2617993877991494, // −15°
-        maxRad: 1.832595714594046, // +105°
-        maxVelocityRadS: 1.0,
-        maxAccelerationRadS2: 5.0,
-        maxJerkRadS3: 25.0,
+        minRad: -Math.PI,
+        maxRad: Math.PI,
+        maxVelocityRadS: 0.8,
+        maxAccelerationRadS2: 3.0,
+        maxJerkRadS3: 8.0,
       },
       {
         name: "q3",
-        minRad: -2.6179938779914944, // −150°
-        maxRad: 0,
-        maxVelocityRadS: 1.0,
-        maxAccelerationRadS2: 5.0,
-        maxJerkRadS3: 25.0,
+        minRad: -Math.PI,
+        maxRad: Math.PI,
+        maxVelocityRadS: 0.9,
+        maxAccelerationRadS2: 2.5,
+        maxJerkRadS3: 8.0,
       },
     ]);
+  });
+
+  it("pins the default Home Point at [213, 0, 305] mm", () => {
+    expect(DEFAULT_MIKO_MINI_HOME_MM).toEqual([213, 0, 305]);
   });
 });
 
 describe("MiKo-mini interface contract", () => {
   const model = defaultModel();
 
-  it("reports angle-limit with the max bound for targets above the shoulder range", () => {
-    // Straight above the base: shoulder-up solution needs q2 ≈ 2.25 rad > +105°.
+  it("reports angle-limit with the max bound for targets folded behind the base", () => {
+    // Straight above the base with the tool subtracted: the shoulder-up
+    // solution needs q2 ≈ 3.86 rad > +π.
     const result = model.inverseKinematics([0, 0, 200]);
     if (result.status !== "angle-limit") throw new Error(`expected angle-limit, got ${result.status}`);
     expect(result.joint).toBe("q2");

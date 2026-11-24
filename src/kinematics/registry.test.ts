@@ -30,7 +30,7 @@ describe("robot registry configuration", () => {
       ...DEFAULT_MIKO_MINI_CONFIG,
       id: "bench-mock",
       name: "Bench mock",
-      geometry: { baseHeightMm: 10, upperArmMm: 50, forearmMm: 40 },
+      geometry: { baseHeightMm: 10, upperArmMm: 50, forearmMm: 40, toolOffsetMm: 5 },
     };
     const result = createRobotRegistry([config]);
     if (result.status !== "ok") throw new Error(`registry failed: ${result.problems.join("; ")}`);
@@ -39,9 +39,9 @@ describe("robot registry configuration", () => {
     if (!model) throw new Error("model bench-mock was not resolved");
     expect(model.name).toBe("Bench mock");
 
-    // Fully extended forward: r = 50 + 40, z = 10.
+    // Fully extended forward: r = 50 + 40 + 5, z = 10.
     const p = model.forwardKinematics([0, 0, 0]);
-    expect(p[0]).toBeCloseTo(90, 9);
+    expect(p[0]).toBeCloseTo(95, 9);
     expect(p[2]).toBeCloseTo(10, 9);
   });
 
@@ -49,12 +49,13 @@ describe("robot registry configuration", () => {
     const result = createRobotRegistry([
       {
         ...DEFAULT_MIKO_MINI_CONFIG,
-        geometry: { baseHeightMm: -1, upperArmMm: -5, forearmMm: 40 },
+        geometry: { baseHeightMm: -1, upperArmMm: -5, forearmMm: 40, toolOffsetMm: -3 },
       },
     ]);
     if (result.status !== "invalid-config") throw new Error("expected invalid-config");
     expect(result.problems.some((p) => p.includes("upperArmMm"))).toBe(true);
     expect(result.problems.some((p) => p.includes("baseHeightMm"))).toBe(true);
+    expect(result.problems.some((p) => p.includes("toolOffsetMm"))).toBe(true);
   });
 
   it("reports invalid joint limits and dynamics with named problems", () => {
@@ -72,7 +73,7 @@ describe("robot registry configuration", () => {
   it("reports duplicate ids even when the earlier config with that id failed validation", () => {
     const invalid = {
       ...DEFAULT_MIKO_MINI_CONFIG,
-      geometry: { baseHeightMm: -1, upperArmMm: 90, forearmMm: 90 },
+      geometry: { baseHeightMm: -1, upperArmMm: 159.8045, forearmMm: 159.8045, toolOffsetMm: 53 },
     };
     const result = createRobotRegistry([
       invalid,

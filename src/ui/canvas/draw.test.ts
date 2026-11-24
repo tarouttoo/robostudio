@@ -112,7 +112,7 @@ describe("drawScene", () => {
   it("flags a violating Segment in red while a reachable Segment keeps its own colour", () => {
     const { ctx, ops } = recordingCtx();
     const okLine = line({ start: vec3(100, 0, 0), end: vec3(150, 0, 0), feed: 20 });
-    const violating = line({ start: vec3(150, 0, 0), end: vec3(250, 0, 0), feed: 20 });
+    const violating = line({ start: vec3(250, 0, 0), end: vec3(400, 0, 0), feed: 20 });
     drawScene(ctx, {
       ...baseScene(model),
       segments: [okLine, violating],
