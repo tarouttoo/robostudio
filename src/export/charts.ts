@@ -441,8 +441,12 @@ const SIN_30 = 0.5;
  * Z stays vertical. All three unit axes project to length exactly 1,
  * so with the uniform plot scale the view is equal-aspect by
  * construction — a cube draws as a proper isometric cube.
+ *
+ * Shared by every isometric view in the export layer (the path-3d
+ * chart here, the Motion Preview frames in `motion-preview.ts`), so
+ * one convention pins them all (ADR 0013).
  */
-function projectIsometric(p: Vec3): readonly [number, number] {
+export function projectIsometric(p: Vec3): readonly [number, number] {
   const right = (p[0] - p[1]) * COS_30;
   const up = p[2] + (p[0] + p[1]) * SIN_30;
   return [right, up];
