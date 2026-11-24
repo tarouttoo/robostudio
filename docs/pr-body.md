@@ -116,4 +116,5 @@ necessarily HEAD:
 - [ ] Door call survives your one-way-door list; blast radius makes sense
 - [ ] Review comment audited the body — no unresolved discrepancy
 - [ ] Threads resolved by you (agents never resolve them)
-- [ ] You merge — the pipeline never does
+- [ ] You merge — or the pipeline auto-merges on a clean review with a
+      declared two-way door ([ADR 0011](adr/0011-auto-merge-after-clean-review.md))

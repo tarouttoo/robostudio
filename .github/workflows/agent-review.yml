@@ -149,7 +149,7 @@ jobs:
           # the review's body audit rather than parsed here.
           door=$(gh pr view "$PR_NUMBER" --json body --jq .body \
             | grep -ioE '\*\*Door:\*\*[[:space:]]*[a-z-]+' \
-            | tail -n1 | sed 's/.*://; s/[[:space:]]*//g')
+            | tail -n1 | sed 's/.*:\*\*//; s/[[:space:]]*//g')
           if [ "$door" != "two-way" ]; then
             echo "PR does not declare Door: two-way — holding the merge."
             gh pr comment "$PR_NUMBER" --body "Auto-merge held: the Merge Danger section does not declare \`**Door:** two-way\` (declared: \`${door:-none}\`). Correct the PR body — or the change itself — then re-add \`agent:review\`."
