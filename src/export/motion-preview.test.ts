@@ -184,27 +184,19 @@ describe("motion preview frame geometry", () => {
 
   it("marks the Home Point in every frame at the home's projected pixel", () => {
     const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
-    const home2 = iso([200, 0, 100]);
     for (const frame of frames) {
       const dots = frame.primitives.filter(
         (p) => p.kind === "dot" && p.colorIndex === MOTION_PREVIEW_COLORS.home,
       );
       expect(dots.length).toBe(1);
-      // The dot must sit within a pixel of the projected Home Point —
-      // relative to the drawn scene's scale (checked via the drawn line's
-      // pixel length, so the pin scales with the fit).
       const dot = dots[0]!.points[0]!;
       const traj = polylines(frame, MOTION_PREVIEW_COLORS.trajectory, "solid")[0] as readonly (readonly [number, number])[];
-      const pxLen = Math.hypot(traj[traj.length - 1]![0] - traj[0]![0], traj[traj.length - 1]![1] - traj[0]![1]);
-      const mmLen = Math.hypot(86.60254, 50);
-      const scale = pxLen / mmLen;
       const trajStart = traj[0]!;
       // The trajectory's first sample starts at the Home Point, so its
-      // polyline's first pixel is the home's projection.
+      // polyline's first pixel is the home's projection (within a pixel
+      // of rounding).
       expect(Math.abs(dot[0] - trajStart[0])).toBeLessThanOrEqual(1);
       expect(Math.abs(dot[1] - trajStart[1])).toBeLessThanOrEqual(1);
-      void home2;
-      void scale;
     }
   });
 

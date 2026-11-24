@@ -59,11 +59,9 @@ describe("GIF encoder structure", () => {
   });
 
   it("carries each frame's delay in the graphic control extension", () => {
-    const input = twoFrameInput();
-    const bytes = encodeGif(input);
+    const bytes = encodeGif(twoFrameInput());
     const { delays } = decodeGifFrames(bytes);
     expect(delays).toEqual([0.05, 0.05]);
-    void input;
   });
 
   it("round-trips the pixel indices: decoding restores every frame exactly", () => {
