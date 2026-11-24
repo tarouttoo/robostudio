@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { planeCoords } from "../core";
 import { line as coreLine, vec2, vec3 } from "../core";
+import { checkPointReachability } from "../kinematics/reachability";
 import { type ProjectContent } from "../project";
 import {
   DEFAULT_ARC_RADIUS_MM,
   DEFAULT_FEED_MM_MIN,
+  DEFAULT_HOME_POINT,
   draftPreviewOf,
   editorReducer,
   initialEditorState,
@@ -14,6 +16,7 @@ import {
   projectContentOf,
   type EditorState,
 } from "./editor";
+import { MIKO_MINI } from "./robot";
 
 /** Clicks the canvas at plane coordinates (u, v). */
 function click(state: EditorState, u: number, v: number): EditorState {
@@ -26,7 +29,7 @@ function drawLine(state: EditorState, u1: number, v1: number, u2: number, v2: nu
 }
 
 describe("editor state", () => {
-  it("starts on the XY plane at fixed 0 with a default feed and no geometry", () => {
+  it("starts on the XY plane at fixed 0 with a default feed, the default Home Point, and no Segments", () => {
     expect(initialEditorState).toEqual({
       plane: "XY",
       fixedMm: 0,
@@ -35,12 +38,22 @@ describe("editor state", () => {
       arcMode: "radius",
       arcDirection: "CCW",
       arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
-      home: null,
+      home: DEFAULT_HOME_POINT,
       segments: [],
       draftStart: null,
       draftCenter: null,
       error: null,
     });
+  });
+
+  it("defaults the Home Point to the MiKo-mini's [213, 0, 305] (ADR 0015)", () => {
+    expect(DEFAULT_HOME_POINT).toEqual(vec3(213, 0, 305));
+  });
+
+  it("opens with a default Home Point that is Reachable under the MiKo-mini model", () => {
+    expect(initialEditorState.home).not.toBeNull();
+    const home = initialEditorState.home as { x: number; y: number; z: number };
+    expect(checkPointReachability(MIKO_MINI, [home.x, home.y, home.z])).toBe("ok");
   });
 
   it("commits a canonical Line Segment after two clicks, on the plane", () => {
@@ -125,13 +138,13 @@ describe("editor state", () => {
     expect(undone.home).toEqual({ x: 1, y: 2, z: 0 });
   });
 
-  it("clear empties the canvas: Segments, Home Point, and draft", () => {
+  it("clear empties the canvas: Segments and draft, restoring the default Home Point", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "home" });
     state = click(state, 1, 2);
     state = { ...drawLine({ ...state, tool: "line" }, 0, 0, 5, 5), draftStart: vec2(9, 9) };
     const cleared = editorReducer(state, { type: "clear" });
     expect(cleared.segments).toEqual([]);
-    expect(cleared.home).toBeNull();
+    expect(cleared.home).toEqual(DEFAULT_HOME_POINT);
     expect(cleared.draftStart).toBeNull();
     // Plane, fixed coordinate, feed, and tool survive the clear.
     expect(cleared.plane).toBe(state.plane);

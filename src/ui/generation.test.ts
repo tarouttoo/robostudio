@@ -163,6 +163,7 @@ describe("generation: session", () => {
   it("refuses generation without a Home Point, naming what to set", () => {
     const outcome = createGenerationSession(scriptedModel()).run({
       ...initialEditorState,
+      home: null, // the editor defaults to [213, 0, 305]; unset it explicitly
       segments: REACHABLE_LINE,
     });
     if (outcome.kind !== "blocked") throw new Error(`expected blocked, got ${outcome.kind}`);
@@ -217,7 +218,7 @@ describe("generation: the outcome carries its charts", () => {
     const failed = session.run(stateWith([line({ start: HOME, end: vec3(300, 0, 60), feed: 20 })]));
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     expect("charts" in failed).toBe(false);
-    const blocked = session.run({ ...initialEditorState });
+    const blocked = session.run({ ...initialEditorState, home: null });
     if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
     expect("charts" in blocked).toBe(false);
   });
@@ -254,7 +255,7 @@ describe("generation: log lines", () => {
   });
 
   it("on a blocked start carries the operator reason", () => {
-    const outcome = createGenerationSession(scriptedModel()).run({ ...initialEditorState });
+    const outcome = createGenerationSession(scriptedModel()).run({ ...initialEditorState, home: null });
     if (outcome.kind !== "blocked") throw new Error(`expected blocked, got ${outcome.kind}`);
     expect(generationLogLines(outcome)).toEqual([{ kind: "blocked", text: outcome.reason }]);
   });
@@ -320,7 +321,7 @@ describe("generation: landing view after an attempt", () => {
     if (failed.kind !== "failed") throw new Error(`expected failed, got ${failed.kind}`);
     expect(viewAfterGeneration(failed)).toBe<MainView>("drawing");
     // Same for a blocked start (no Home Point set).
-    const blocked = session.run({ ...initialEditorState, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
+    const blocked = session.run({ ...initialEditorState, home: null, segments: [line({ start: HOME, end: vec3(100, 0, 60), feed: 20 })] });
     if (blocked.kind !== "blocked") throw new Error(`expected blocked, got ${blocked.kind}`);
     expect(viewAfterGeneration(blocked)).toBe<MainView>("drawing");
   });

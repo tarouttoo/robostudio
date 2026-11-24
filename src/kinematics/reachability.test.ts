@@ -31,8 +31,9 @@ describe("checkPointReachability", () => {
   });
 
   it("reports angle-limit for a reachable point whose shoulder-up solution violates a joint limit", () => {
-    // r = 10 mm at shoulder height folds the elbow past its q3 minimum.
-    expect(checkPointReachability(model, [10, 0, 60])).toBe("angle-limit");
+    // Radial 40 mm at z = 170 mm sits behind the base axis above the
+    // shoulder: the shoulder-up fold needs q2 ≈ 4.005 rad > +π.
+    expect(checkPointReachability(model, [40, 0, 170])).toBe("angle-limit");
   });
 });
 
@@ -58,60 +59,63 @@ describe("checkSegmentReachability", () => {
   });
 
   it("flags a Line crossing out of the workspace, naming the first offending point", () => {
-    const segment = line({ start: vec3(150, 0, 0), end: vec3(250, 0, 0), feed });
+    // At z = 0 the wrist must sit within sqrt(319.609² − 160²) ≈ 276.7 mm
+    // of the base axis after the 53 mm tool is subtracted, i.e. the TCP
+    // edge sits near r = 329.7 mm.
+    const segment = line({ start: vec3(150, 0, 0), end: vec3(400, 0, 0), feed });
     const violation = checkSegmentReachability(model, segment);
     expect(violation).not.toBeNull();
     if (violation === null) throw new Error("expected a violation");
     if (violation?.status !== "unreachable") throw new Error("expected an unreachable violation");
-    expect(violation.atMm.x).toBeGreaterThan(169); // workspace edge at z = 0 sits near r = 169.1
-    expect(violation.atMm.x).toBeLessThanOrEqual(250);
+    expect(violation.atMm.x).toBeGreaterThan(329);
+    expect(violation.atMm.x).toBeLessThanOrEqual(400);
     expect(violation.atMm.y).toBe(0);
     expect(violation.atMm.z).toBe(0);
   });
 
   it("flags an Arc violation that only appears mid-sweep, not at the endpoints", () => {
-    // A quarter circle of radius 100 around (100, 100, 0) bulges out to
-    // r ≈ 173 mm — past the z = 0 workspace edge near r = 169.1, where
-    // the pose first violates q2's minimum and then leaves the
-    // workspace entirely — while both endpoints stay reachable.
+    // A 120° sweep of a circle of radius 60 around (280, 0, 0) bulges out
+    // to r = 340 mm — past the z = 0 workspace edge near r = 329.7 mm —
+    // while both endpoints stay inside at r ≈ 314.3 mm.
+    const arcY = 60 * (Math.sqrt(3) / 2);
     const segment = arcFromCenter({
       plane: "XY",
-      start: vec3(100, 0, 0),
-      end: vec3(0, 100, 0),
-      center: vec3(100, 100, 0),
-      direction: "CCW",
+      start: vec3(310, arcY, 0),
+      end: vec3(310, -arcY, 0),
+      center: vec3(280, 0, 0),
+      direction: "CW",
       feed,
     });
     const violation = checkSegmentReachability(model, segment);
     expect(violation).not.toBeNull();
     if (violation === null) throw new Error("expected a violation");
-    if (violation?.status !== "angle-limit") throw new Error("expected an angle-limit violation");
-    expect(violation.joint).toBe("q2");
-    expect(violation.bound).toBe("min");
+    if (violation?.status !== "unreachable") throw new Error("expected an unreachable violation");
     const r = Math.hypot(violation.atMm.x, violation.atMm.y);
-    expect(r).toBeGreaterThan(169);
-    expect(r).toBeLessThan(170);
+    expect(r).toBeGreaterThan(329);
+    expect(Math.abs(violation.atMm.y)).toBeLessThan(arcY); // strictly between the endpoints
   });
 
   it("flags a Line that starts outside the workspace as unreachable from its first sample", () => {
-    const segment = line({ start: vec3(200, 0, 60), end: vec3(250, 0, 60), feed });
+    const segment = line({ start: vec3(400, 0, 160), end: vec3(450, 0, 160), feed });
     const violation = checkSegmentReachability(model, segment);
     expect(violation).not.toBeNull();
     if (violation === null) throw new Error("expected a violation");
     if (violation?.status !== "unreachable") throw new Error("expected an unreachable violation");
-    expect(violation.atMm).toEqual({ x: 200, y: 0, z: 60 });
+    expect(violation.atMm).toEqual({ x: 400, y: 0, z: 160 });
   });
 
-  it("flags a Line whose interior point only violates a joint limit", () => {
-    // The z = 0 region near the origin is geometrically reachable but
-    // needs q2 below its -15° minimum.
-    const segment = line({ start: vec3(100, 0, 0), end: vec3(2.5, 0, 0), feed });
+  it("flags a Line whose interior runs into a joint-limit-only zone", () => {
+    // Above the shoulder, behind the base axis (radial below the 53 mm
+    // tool), the shoulder-up fold needs q2 past +π — geometrically in the
+    // workspace, but outside the joint limits. The Line starts at radial
+    // 56 mm (wrist radius 3 mm, still solvable) and ends deep in the zone.
+    const segment = line({ start: vec3(56, 0, 200), end: vec3(36, 0, 200), feed });
     const violation = checkSegmentReachability(model, segment);
     expect(violation).not.toBeNull();
     if (violation === null) throw new Error("expected a violation");
     if (violation?.status !== "angle-limit") throw new Error("expected an angle-limit violation");
     expect(violation.joint).toBe("q2");
-    expect(violation.bound).toBe("min");
+    expect(violation.bound).toBe("max");
   });
 
   it("flags a Point Segment by its target alone", () => {

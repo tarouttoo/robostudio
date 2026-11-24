@@ -13,7 +13,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { BrowserWindow, app } from "electron";
 
-const out = resolve(process.argv[2] ?? "/tmp/evidence/app.png");
+// Electron's argv carries the Electron binary, every CLI flag, and this
+// script's own path before any script arguments, so the output file is
+// the last argument that is not the running script. Filtering it out
+// also rescues the documented no-argument default: argv is never empty,
+// and a bare argv.at(-1) would resolve to this very file and overwrite
+// it with the screenshot bytes.
+const out = resolve(
+  process.argv.filter((arg) => !arg.endsWith(".mjs")).at(-1) ?? "/tmp/evidence/app.png",
+);
 const width = Number(process.env.EVIDENCE_WIDTH ?? 1280);
 const height = Number(process.env.EVIDENCE_HEIGHT ?? 800);
 const settleMs = Number(process.env.EVIDENCE_SETTLE_MS ?? 2000);
@@ -43,7 +51,7 @@ app
     console.log(`Saved ${out} (${size.width}x${size.height})`);
     app.exit(0);
   })
-  .catch((error: unknown) => {
+  .catch((error) => {
     console.error(error);
     app.exit(1);
   });

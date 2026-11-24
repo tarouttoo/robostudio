@@ -7,7 +7,7 @@ import {
   type Vec3,
 } from "./robot-model";
 
-/** Link geometry of the MiKo-mini chain, in millimetres. */
+/** Link geometry of the MiKo-mini chain, in millimetres (ADR 0015). */
 export interface MiKoMiniGeometry {
   /** Height of the shoulder above the base frame origin (Z offset). */
   readonly baseHeightMm: number;
@@ -15,6 +15,8 @@ export interface MiKoMiniGeometry {
   readonly upperArmMm: number;
   /** Forearm length (elbow → wrist). */
   readonly forearmMm: number;
+  /** Horizontal tool offset from the wrist along the forearm's radial direction. */
+  readonly toolOffsetMm: number;
 }
 
 /** Configuration for the analytic MiKo-mini Robot Model. */
@@ -32,43 +34,51 @@ export interface MiKoMiniRobotConfig {
 }
 
 /**
- * The v1 MiKo-mini constants carried from the prototype as tested
- * configuration: a 90 + 90 mm planar pair on a 60 mm base column, with
- * the joint and dynamic limits the motion planner must respect. Being
+ * The MiKo-mini constants measured on the real prototype (ADR 0015):
+ * a 160 mm shoulder column, two 159.8045 mm links (a measured value —
+ * never round it), and a 53 mm horizontal tool offset, with the joint
+ * and dynamic limits the motion planner must respect. Being
  * configuration, corrected values land here without code changes.
  */
 export const DEFAULT_MIKO_MINI_CONFIG: MiKoMiniRobotConfig = {
   kind: "miko-mini",
   id: "miko-mini",
   name: "MiKo-mini",
-  geometry: { baseHeightMm: 60, upperArmMm: 90, forearmMm: 90 },
+  geometry: { baseHeightMm: 160, upperArmMm: 159.8045, forearmMm: 159.8045, toolOffsetMm: 53 },
   joints: [
     {
       name: "q1",
       minRad: -Math.PI,
       maxRad: Math.PI,
-      maxVelocityRadS: 1.0,
-      maxAccelerationRadS2: 5.0,
-      maxJerkRadS3: 25.0,
+      maxVelocityRadS: 1.2,
+      maxAccelerationRadS2: 2.8,
+      maxJerkRadS3: 9.0,
     },
     {
       name: "q2",
-      minRad: -(Math.PI / 12), // -15°
-      maxRad: (7 * Math.PI) / 12, // +105°
-      maxVelocityRadS: 1.0,
-      maxAccelerationRadS2: 5.0,
-      maxJerkRadS3: 25.0,
+      minRad: -Math.PI,
+      maxRad: Math.PI,
+      maxVelocityRadS: 0.8,
+      maxAccelerationRadS2: 3.0,
+      maxJerkRadS3: 8.0,
     },
     {
       name: "q3",
-      minRad: -((5 * Math.PI) / 6), // -150°
-      maxRad: 0,
-      maxVelocityRadS: 1.0,
-      maxAccelerationRadS2: 5.0,
-      maxJerkRadS3: 25.0,
+      minRad: -Math.PI,
+      maxRad: Math.PI,
+      maxVelocityRadS: 0.9,
+      maxAccelerationRadS2: 2.5,
+      maxJerkRadS3: 8.0,
     },
   ],
 };
+
+/**
+ * The default Home Point (Исходная точка, ADR 0015): the 3D point where
+ * the drawn Trajectory starts at editor start and after Clear, in the
+ * MiKo-mini's workspace. Coordinates in millimetres, model frame.
+ */
+export const DEFAULT_MIKO_MINI_HOME_MM: readonly [number, number, number] = [213, 0, 305];
 
 /** Named problems found while validating a {@link MiKoMiniRobotConfig}. */
 export type MiKoMiniConfigResult =
@@ -79,28 +89,31 @@ export type MiKoMiniConfigResult =
  * Forward kinematics of the MiKo-mini chain (3-DOF: base rotation q1
  * about +Z, then the two planar links in the vertical plane; q2 is the
  * shoulder pitch above horizontal, q3 the elbow pitch relative to the
- * upper arm):
+ * upper arm). The 53 mm tool (ADR 0015) extends the radial term:
  *
  * ```text
- * r = L1·cos(q2) + L2·cos(q2 + q3)
+ * r = L1·cos(q2) + L2·cos(q2 + q3) + tool
  * x = cos(q1)·r
  * y = sin(q1)·r
  * z = baseHeight + L1·sin(q2) + L2·sin(q2 + q3)
  * ```
  *
- * Inverse kinematics returns the shoulder-up branch only: the elbow sits
- * above the shoulder→wrist chord, so `q3 = −acos(D)` and
- * `q2 = atan2(z − h, r) − atan2(L2·sin(q3), L1 + L2·cos(q3))`. Any point
- * whose shoulder-up solution violates a joint limit is reported as an
- * `angle-limit` status rather than solved with the elbow-down branch.
+ * Inverse kinematics subtracts the tool offset from the radial term
+ * first, then returns the shoulder-up branch only: the elbow sits above
+ * the shoulder→wrist chord, so `q3 = −acos(D)` and
+ * `q2 = atan2(z − h, r − tool) − atan2(L2·sin(q3), L1 + L2·cos(q3))`.
+ * Any point whose shoulder-up solution violates a joint limit is
+ * reported as an `angle-limit` status rather than solved with the
+ * elbow-down branch.
  */
 export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfigResult {
   const problems = validateConfig(config);
   if (problems.length > 0) return { status: "invalid-config", problems };
 
-  const { baseHeightMm, upperArmMm, forearmMm } = config.geometry;
+  const { baseHeightMm, upperArmMm, forearmMm, toolOffsetMm } = config.geometry;
   const l1 = upperArmMm;
   const l2 = forearmMm;
+  const tool = toolOffsetMm;
   const [j1, j2, j3] = config.joints as readonly [JointConfig, JointConfig, JointConfig];
   const limits = [j1, j2, j3] as const;
 
@@ -111,7 +124,7 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
     const q1 = angles[0] as number;
     const q2 = angles[1] as number;
     const q3 = angles[2] as number;
-    const r = l1 * Math.cos(q2) + l2 * Math.cos(q2 + q3);
+    const r = l1 * Math.cos(q2) + l2 * Math.cos(q2 + q3) + tool;
     return vec3(
       Math.cos(q1) * r,
       Math.sin(q1) * r,
@@ -127,16 +140,19 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
     // guard NaN would silently pass every comparison below and return ok.
     if (![zx, zy, dz].every(Number.isFinite)) return { status: "unreachable" };
     const r2 = zx * zx + zy * zy;
+    // The tool offset moves the wrist inward: the planar pair solves for
+    // the wrist point, not the TCP.
+    const wristR = Math.sqrt(r2) - tool;
 
     // cos(q3) from the law of cosines on the shoulder→wrist triangle.
-    const d = (r2 + dz * dz - l1 * l1 - l2 * l2) / (2 * l1 * l2);
+    const d = (wristR * wristR + dz * dz - l1 * l1 - l2 * l2) / (2 * l1 * l2);
     // 1e-9 slack absorbs roundoff on the workspace boundary before the clamp.
     if (d > 1 + 1e-9 || d < -1 - 1e-9) return { status: "unreachable" };
     const cosQ3 = Math.min(1, Math.max(-1, d));
 
     const q3 = -Math.acos(cosQ3); // shoulder-up branch
     const psi = Math.atan2(l2 * Math.sin(q3), l1 + l2 * Math.cos(q3));
-    const q2 = Math.atan2(dz, Math.sqrt(r2)) - psi;
+    const q2 = Math.atan2(dz, wristR) - psi;
     const q1 = Math.atan2(zy, zx);
     const solution = [q1, q2, q3] as const;
 
@@ -185,7 +201,7 @@ export function createMiKoMiniModel(config: MiKoMiniRobotConfig): MiKoMiniConfig
 
 function validateConfig(config: MiKoMiniRobotConfig): string[] {
   const problems: string[] = [];
-  const { baseHeightMm, upperArmMm, forearmMm } = config.geometry;
+  const { baseHeightMm, upperArmMm, forearmMm, toolOffsetMm } = config.geometry;
   if (!Number.isFinite(baseHeightMm) || baseHeightMm < 0) {
     problems.push(`geometry.baseHeightMm must be a finite non-negative number, got ${baseHeightMm}`);
   }
@@ -194,6 +210,9 @@ function validateConfig(config: MiKoMiniRobotConfig): string[] {
   }
   if (!Number.isFinite(forearmMm) || forearmMm <= 0) {
     problems.push(`geometry.forearmMm must be finite and positive, got ${forearmMm}`);
+  }
+  if (!Number.isFinite(toolOffsetMm) || toolOffsetMm < 0) {
+    problems.push(`geometry.toolOffsetMm must be a finite non-negative number, got ${toolOffsetMm}`);
   }
   if (config.joints.length !== 3) {
     problems.push(`MiKo-mini requires exactly 3 joints, got ${config.joints.length}`);

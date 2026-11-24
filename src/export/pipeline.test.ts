@@ -130,7 +130,7 @@ describe("pipeline: named stage failures stop the chain", () => {
 
   it("fails the ik stage naming the point outside the workspace", () => {
     const far = trajectory(vec3(80, 0, 60), [
-      line({ start: vec3(80, 0, 60), end: vec3(300, 0, 60), feed: 20 }),
+      line({ start: vec3(80, 0, 60), end: vec3(400, 0, 60), feed: 20 }),
     ]);
     try {
       runPipeline({ trajectory: far, model, planner: createPchipPlanner(model) });
@@ -145,9 +145,10 @@ describe("pipeline: named stage failures stop the chain", () => {
   });
 
   it("fails the ik stage naming the joint that would exceed its limits", () => {
-    // Near the base axis the shoulder-up solution folds the elbow past -150°.
-    const folded = trajectory(vec3(30, 0, 60), [
-      line({ start: vec3(30, 0, 60), end: vec3(30, 10, 60), feed: 20 }),
+    // Behind the base axis above the shoulder, the shoulder-up solution
+    // folds q2 past +π.
+    const folded = trajectory(vec3(40, 0, 170), [
+      line({ start: vec3(40, 0, 170), end: vec3(40, 10, 170), feed: 20 }),
     ]);
     try {
       runPipeline({ trajectory: folded, model, planner: createPchipPlanner(model) });
@@ -155,7 +156,7 @@ describe("pipeline: named stage failures stop the chain", () => {
     } catch (error) {
       const pipelineError = error as PipelineError;
       expect(pipelineError.stage).toBe("ik");
-      expect(pipelineError.message).toMatch(/joint q3/);
+      expect(pipelineError.message).toMatch(/joint q2/);
       expect(pipelineError.message).toMatch(/limit/);
     }
   });

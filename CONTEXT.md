@@ -37,6 +37,8 @@ Actions, ported from mattpocock/sandcastle) that implements
 - [`docs/labels.md`](docs/labels.md), [`docs/triage.md`](docs/triage.md),
   [`docs/pr-body.md`](docs/pr-body.md), [`docs/agents/`](docs/agents/) —
   pipeline operations.
+- `docs/adr/0015-prototype-measured-miko-mini-geometry.md` — the measured
+  MiKo-mini constants (links, tool offset, limits, default Home Point).
 - `.sandcastle/CODING_STANDARDS.md` — the code style the workflow agents
   apply; referenced verbatim by prompts.
 

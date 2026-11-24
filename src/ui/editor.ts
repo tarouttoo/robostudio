@@ -20,6 +20,7 @@ import {
   planePoint,
   point,
   vec2,
+  vec3,
   type ArcDirection,
   type Segment,
   type Vec2,
@@ -27,6 +28,7 @@ import {
   type WorkingPlane,
 } from "../core";
 import type { ProjectContent } from "../project";
+import { DEFAULT_MIKO_MINI_HOME_MM } from "../kinematics/miko-mini";
 
 /** Arc travel direction, re-exported for the UI that configures it. */
 export type { ArcDirection };
@@ -74,7 +76,19 @@ export interface EditorState {
 /** Default Feed shown in the UI: 1200 mm/min = 20 mm/s. */
 export const DEFAULT_FEED_MM_MIN = 1200;
 
-/** The initial editor state: XY plane at fixed 0, Line tool, empty canvas. */
+/**
+ * The Home Point (Исходная точка) the editor starts with and Clear
+ * restores: the MiKo-mini's measured default [213, 0, 305] mm (ADR 0015),
+ * Reachable under the default Robot Model. The Home Point tool still
+ * re-places it by click.
+ */
+export const DEFAULT_HOME_POINT = vec3(
+  DEFAULT_MIKO_MINI_HOME_MM[0],
+  DEFAULT_MIKO_MINI_HOME_MM[1],
+  DEFAULT_MIKO_MINI_HOME_MM[2],
+);
+
+/** The initial editor state: XY plane at fixed 0, Line tool, default Home Point. */
 export const initialEditorState: EditorState = {
   plane: "XY",
   fixedMm: 0,
@@ -83,7 +97,7 @@ export const initialEditorState: EditorState = {
   arcMode: "radius",
   arcDirection: "CCW",
   arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
-  home: null,
+  home: DEFAULT_HOME_POINT,
   segments: [],
   draftStart: null,
   draftCenter: null,
@@ -245,7 +259,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "undo":
       return { ...state, segments: state.segments.slice(0, -1) };
     case "clear":
-      return { ...state, segments: [], home: null, draftStart: null, draftCenter: null, error: null };
+      // Clear wipes the drawing but restores the default Home Point: a
+      // fresh canvas always starts from the MiKo-mini's [213, 0, 305].
+      return {
+        ...state,
+        segments: [],
+        home: DEFAULT_HOME_POINT,
+        draftStart: null,
+        draftCenter: null,
+        error: null,
+      };
     case "loadProject":
       // The content is already validated by the project layer; restore
       // the drawing (view settings, Home Point, Segments) wholesale and

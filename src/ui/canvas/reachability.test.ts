@@ -17,16 +17,17 @@ describe("createReachabilitySampler", () => {
   const model = defaultModel();
 
   it("classifies cells of the XY plane at the fixed coordinate: allowed near the workspace, blocked far out", () => {
-    // XY at fixed z = 0: (102.5, 2.5) is reachable, (202.5, 2.5) is not.
+    // XY at fixed z = 0: (102.5, 2.5) is reachable, (352.5, 2.5) is not.
     const sampler = createReachabilitySampler(model, "XY", 0);
     expect(sampler.cellMm).toBe(REACHABILITY_CELL_MM);
     expect(sampler.statusAt(102.5, 2.5)).toBe("ok");
-    expect(sampler.statusAt(202.5, 2.5)).toBe("unreachable");
+    expect(sampler.statusAt(352.5, 2.5)).toBe("unreachable");
   });
 
   it("marks limit-violating cells distinctly from unreachable ones", () => {
-    // The z = 0 region near the origin needs q2 below its minimum.
-    const sampler = createReachabilitySampler(model, "XY", 0);
+    // At fixed z = 210 the cells just behind the base axis (radial below
+    // the 53 mm tool) fold the shoulder-up pose past q2 = +π.
+    const sampler = createReachabilitySampler(model, "XY", 210);
     expect(sampler.statusAt(2.5, 2.5)).toBe("angle-limit");
   });
 
@@ -35,7 +36,7 @@ describe("createReachabilitySampler", () => {
     // Both points fall into the lattice cell spanning u ∈ [100, 105), v ∈ [0, 5).
     expect(sampler.statusAt(100.1, 0.2)).toBe(sampler.statusAt(103.9, 3.9));
     // Negative coordinates floor into their own cells symmetrically.
-    expect(sampler.statusAt(-2.5, 2.5)).toBe("angle-limit");
+    expect(sampler.statusAt(-2.5, 2.5)).toBe(sampler.statusAt(-3.9, 3.9));
   });
 
   it("answers from the fixed coordinate: a plane beyond the workspace is blocked everywhere", () => {
