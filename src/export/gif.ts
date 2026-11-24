@@ -146,7 +146,8 @@ export function encodeGif(input: GifInput): Uint8Array {
 
     // LZW-compressed image data in sub-blocks. The declared minimum
     // code size must match the compressor's clear/end codes: it is the
-    // color table's bit depth, floored at the format minimum of 2.
+    // color table's bit depth, floored at the format minimum of 2 —
+    // the same value `lzwCompress` bases its codes on.
     const minCodeSize = Math.max(2, tableBits);
     const lzw = lzwCompress(frame.indexed, minCodeSize);
     bytes(minCodeSize);
@@ -169,8 +170,7 @@ export function encodeGif(input: GifInput): Uint8Array {
  * into ≤ 255-byte sub-block payload (the sub-block length prefixes
  * are added by the caller).
  */
-function lzwCompress(indexed: Uint8Array, tableBits: number): number[] {
-  const minCodeSize = Math.max(2, tableBits);
+function lzwCompress(indexed: Uint8Array, minCodeSize: number): number[] {
   const clearCode = 2 ** minCodeSize;
   const endCode = clearCode + 1;
 
