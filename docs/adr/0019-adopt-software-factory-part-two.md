@@ -126,6 +126,37 @@ human-invoked batch `/retro` (`docs/agents/retro.md`, unchanged).
   events, pull them on a schedule) is remembered for future tasks such as
   CI failure monitoring.
 
+## Stage 2 mechanics (as built)
+
+The target design needed decisions the course diagram does not settle on a
+GitHub-Actions orchestrator. They are recorded here because they are the
+surprising parts:
+
+- **v2 mode is a shape, not a label**: an issue with a parent Spec ships
+  without a PR (branch only — the merger takes it); a standalone issue
+  keeps the classic per-issue PR chain. No mode flag exists to forget.
+- **Ticketless Specs need a marker**: an issue without sub-issues is
+  indistinguishable from a standalone Ticket, so a Spec awaiting
+  decomposition carries the `spec` label (the `wayfinder:map` precedent).
+  `agent:implement` on a `spec`-marked issue runs to-tickets; once tickets
+  exist, sub-issues are the shape and the marker becomes redundant.
+- **Branch conventions**: notes `agent/spec-<n>-notes`, integration
+  `agent/spec-<n>-integration`, tickets unchanged (`agent/issue-<n>-<slug>`).
+- **Merger triggers**: a push to any `agent/issue-*` branch is the pulse
+  (each implement completion may complete a wave), plus a manual
+  `workflow_dispatch` accelerator. All merger runs serialize repo-wide —
+  one concurrency group — because the barrier and the integration branch
+  are per-Spec, and per-Spec groups would race on the same pushes.
+- **Closing Tickets is workflow work, not agent work** (delta №2 made
+  literal): the merger agent merges and keeps the tree sound; the script
+  pushes the integration branch and closes the Tickets deterministically.
+  Close events re-fire the converter — the next wave.
+- **The integration PR is found by the existing chain**: the merger opens
+  ONE draft PR Spec → main with `Closes #<spec>` and labels it
+  `agent:review` (via `AGENT_PAT`), so the review pass and the auto-merge
+  gate (ADR 0011 + 0014) run unchanged — the "single review pass" is that
+  chain on the integration branch.
+
 ## Build order
 
 Approved sequence; items 4–7 of the session plan wait for the operator's

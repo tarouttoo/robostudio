@@ -203,7 +203,7 @@ jobs:
         run: git push --force origin "$BRANCH"
 
       - name: Open draft PR
-        if: steps.shape.outputs.route == 'implement' && success()
+        if: steps.shape.outputs.route == 'implement' && steps.shape.outputs.parent_number == '' && success()
         id: open_pr
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -223,7 +223,7 @@ jobs:
           echo "pr_number=$(basename "$pr_url")" >> "$GITHUB_OUTPUT"
 
       - name: Request automated review
-        if: steps.shape.outputs.route == 'implement' && success()
+        if: steps.shape.outputs.route == 'implement' && steps.shape.outputs.parent_number == '' && success()
         env:
           PR_NUMBER: ${{ steps.open_pr.outputs.pr_number }}
           AGENT_PAT: ${{ secrets.AGENT_PAT }}

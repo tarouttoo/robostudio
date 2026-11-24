@@ -71,6 +71,31 @@ Actions, ported from mattpocock/sandcastle) that implements
   `agent:explore` issue, the agent plans per-issue effects, and a separate
   apply job validates and applies the plan (issue bodies are untrusted
   input and never enter the shell).
+- **v2 routing** — `agent-implement.yml` routes by issue shape (ADR 0019):
+  a Spec with tickets → the exploration-notes runner; a `spec`-marked
+  issue without tickets → the to-tickets runner; a child-of-spec Ticket →
+  the v2 implement runner (branch only, no PR); a standalone issue → the
+  classic PR chain.
+- **To-tickets runner** — the AFK decomposition: the agent plans the
+  Tickets, the script applies the plan (native sub-issue + `blocked_by`
+  edges, verified), labels every Ticket `ready-for-agent` with
+  `AGENT_PAT`, posts a list comment on the Spec, and re-adds
+  `agent:implement` so the next run explores.
+- **Exploration notes** — markdown notes on `agent/spec-<n>-notes` plus a
+  marker comment on the Spec; every implement runner for that Spec's
+  Tickets reads them as shared context (optional, never a prerequisite).
+- **Merger** — `agent-merge.yml` + `merge-spec/merge-spec.ts`: merges each
+  completed wave into `agent/spec-<n>-integration`, closes the Tickets
+  deterministically (close events drive the next wave), and opens one
+  draft PR Spec → main labelled `agent:review` when the Spec is complete.
+  All merger runs serialize repo-wide; retries are
+  `gh workflow run agent-merge.yml -f spec=<n>`.
+- **Auto-Rebase janitor** — `agent-rebase-janitor.yml`: after any merge
+  (and nightly), sweeps conflicting `agent/issue-*` PRs and labels them
+  `agent:update-branch` with `AGENT_PAT`; gated on Agent-quiet.
+- **Improve button** — `agent-improve.yml` (`gh workflow run`, optional
+  `focus` input): files ≤ 5 `improvement` issues via the vendored skill,
+  always waiting for human review.
 - **Canonical triage roles** — the five roles the skills speak in
   (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
   `wontfix`); their mapping to this repo's label strings lives in

@@ -83,18 +83,41 @@ tracking upstream
 
 | Label | Workflow | What happens |
 |---|---|---|
-| `agent:implement` (issue) | `agent-implement.yml` | Preflight gates (refuses PRD-shaped issues / issues with an open collaborator PR; a child-of-spec Ticket passes and its parent Spec is pulled in as context), then an agent implements on an isolated branch and opens a draft PR that closes the issue, then labels the PR `agent:review`. |
+| `agent:implement` (issue) | `agent-implement.yml` | Routes by issue shape (ADR 0019): Spec with tickets → exploration-notes runner; `spec`-marked ticketless issue → to-tickets runner (AFK decomposition); child-of-spec Ticket → v2 implement runner (branch only — the merger takes it); standalone issue → draft PR + `agent:review`. The classic preflights (open collaborator PR refusal) apply to the standalone route. |
 | `agent:implement` (PR) | `agent-implement-pr.yml` | Processes review feedback on an existing PR: replies to threads, addresses inline comments, pushes with a lease. |
-| `agent:review` | `agent-review.yml` | Reviews the PR, self-fixes findings on the branch, posts a PR review, replies to threads, marks the PR ready, then requests a squash auto-merge on a clean review with green CI (ADR 0011). |
+| `agent:review` | `agent-review.yml` | Reviews the PR, self-fixes findings on the branch, posts a PR review, replies to threads, marks the PR ready, then requests a squash auto-merge on a clean review with green CI (ADR 0011). The single review pass for a Spec runs on its integration PR. |
 | `agent:update-branch` | `agent-update-branch.yml` | Resolves merge conflicts with `main` (always resolve, never abort) and pushes. |
+| — (merge + nightly cron) | `agent-rebase-janitor.yml` | The Auto-Rebase janitor (ADR 0019): after any PR merges (and nightly), sweeps open `agent/issue-*` PRs that turned conflicting and labels them `agent:update-branch` via `AGENT_PAT`; exits silently unless the factory is Agent-quiet. |
+| — (manual button) | `agent-improve.yml` | Improve-architecture on demand (ADR 0019): `gh workflow run agent-improve.yml` scans the repo with the vendored skill and files ≤ 5 `improvement` issues, deduped, always waiting for human review. |
+| — (push / dispatch) | `agent-merge.yml` | The merger (ADR 0019): when a Spec's wave of Tickets has all pushed branches, merges them into the Spec's integration branch, closes the Tickets (driving the next wave), and — when the Spec is complete — opens one draft PR Spec → main labelled `agent:review`. Retry a failed run with `gh workflow run agent-merge.yml -f spec=<n>`. |
 | `agent:explore` | `agent-explore.yml` | Batch triage: one agent run plans effects for every open `agent:explore` issue; a separate apply job validates the plan and applies it. Supports `workflow_dispatch` dry-run. |
-| `ready-for-agent` (issue) | `agent-convert.yml` | The ready-for-agent converter: a Ticket labelled `ready-for-agent` is evaluated on labelling and re-scanned whenever another issue closes; when the last blocker closes, the label is swapped for `agent:implement` (added with `AGENT_PAT` so the cascade fires), otherwise a comment names the open blockers. |
+| `ready-for-agent` (issue) | `agent-convert.yml` | The ready-for-agent converter: a Ticket labelled `ready-for-agent` is evaluated on labelling and re-scanned whenever another issue closes; when the last blocker closes, the label is swapped for `agent:implement` (added with `AGENT_PAT` so the cascade fires), otherwise a comment names the open blockers. In the v2 flow it is also the frontier computer for a Spec's waves. |
 
 Every agent run posts a failure comment with a reason and the workflow-run
 link, and relabels the subject `agent:blocked`. Retrying means re-adding the
 trigger label named in that comment. For a converted Ticket — one that was
 waiting on `ready-for-agent` — retry it by removing and re-adding
-`ready-for-agent`.
+`ready-for-agent`. A failed merger labels the Spec `agent:blocked`; retry
+with `gh workflow run agent-merge.yml -f spec=<n>`.
+
+### The v2 Spec flow (ADR 0019)
+
+A Spec flows differently from a standalone issue. Label the Spec
+`agent:implement` (mark it `spec` first if it has no tickets yet):
+
+1. **To-tickets** (if no tickets): the factory decomposes the Spec into
+   Tickets with blocking edges and labels them `ready-for-agent` — no
+   human checkpoint; audit via the list comment. Brakes: close a Ticket or
+   remove its label.
+2. **Exploration**: notes are saved on `agent/spec-<n>-notes` and pointed
+   to from a comment on the Spec.
+3. **Waves**: the converter fires Tickets as blockers close; each v2
+   implement run pushes a branch (no PR); the merger merges each completed
+   wave into `agent/spec-<n>-integration` and closes the Tickets — driving
+   the next wave.
+4. **One PR**: when the last Ticket closes, the merger opens a single
+   draft PR Spec → main and labels it `agent:review` — the usual review +
+   auto-merge chain runs on it.
 
 Agent draft PRs are authored by `github-actions[bot]` (the "Open draft PR"
 step runs on `GITHUB_TOKEN`), so GitHub's workflow-approval gate can
@@ -198,6 +221,6 @@ ADRs:
 Pipeline files ported from
 [mattpocock/sandcastle](https://github.com/mattpocock/sandcastle)
 @ `a53e227250fb51df0ad54155b85fecc1c090c937` — © Matt Pocock, MIT.
-The vendored `pr` and `code-review` agent skills come from Matt Pocock's
-skills pack — © Matt Pocock, MIT.
+The vendored `pr`, `code-review` and `improve-codebase-architecture` agent
+skills come from Matt Pocock's skills pack — © Matt Pocock, MIT.
 Template scaffolding — © tarouttoo, MIT. See `LICENSE`.

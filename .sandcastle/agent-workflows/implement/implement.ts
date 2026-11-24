@@ -47,21 +47,32 @@ try {
   };
   const NOTES = notesBranch();
 
+  // Spec Tickets ship without a PR in the v2 flow (ADR 0019): their work
+  // lands on the branch and the merger integrates the wave. Standalone
+  // issues keep the classic per-issue PR chain.
+  const isSpecTicket = parseParentNumber(PARENT_NUMBER) !== null;
+  const promptArgs: Record<string, string> = {
+    ISSUE_NUMBER,
+    ISSUE_TITLE,
+    BRANCH,
+    ISSUE_CONTEXT: issueContext,
+    PARENT_CONTEXT: parentContext,
+    NOTES,
+  };
+  if (!isSpecTicket) {
+    promptArgs.PR_BODY_PATH = PR_BODY_PATH;
+  }
+
   const result = await sandcastle.run({
     name: `implement-#${ISSUE_NUMBER}`,
     agent: agentFromEnv(),
     sandbox: noSandbox(),
     logging: { type: "stdout" },
-    promptFile: path.join(import.meta.dirname, "prompt.md"),
-    promptArgs: {
-      ISSUE_NUMBER,
-      ISSUE_TITLE,
-      BRANCH,
-      ISSUE_CONTEXT: issueContext,
-      PARENT_CONTEXT: parentContext,
-      NOTES,
-      PR_BODY_PATH,
-    },
+    promptFile: path.join(
+      import.meta.dirname,
+      isSpecTicket ? "prompt-spec-ticket.md" : "prompt.md",
+    ),
+    promptArgs,
   });
 
   const commitsAhead = Number(sh("git rev-list --count main..HEAD").trim());

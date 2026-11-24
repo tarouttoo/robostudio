@@ -21,7 +21,7 @@ mattpocock/skills speaks in (`needs-triage`, `needs-info`, `ready-for-agent`,
 
 | Label | Add it to | Starts | Notes |
 |---|---|---|---|
-| `agent:implement` | issues | `agent-implement.yml` | Routes by issue shape (ADR 0019): a Spec with tickets → the exploration-notes runner (markdown notes on a branch + an exploration comment); a `spec`-marked issue without tickets → the to-tickets runner (AFK decomposition; tickets enter the pipeline immediately); otherwise the classic chain — an agent implements on an isolated branch and opens a draft PR that closes the issue, then labels the PR `agent:review`. |
+| `agent:implement` | issues | `agent-implement.yml` | Routes by issue shape (ADR 0019): a Spec with tickets → the exploration-notes runner (markdown notes on `agent/spec-<n>-notes` + an exploration comment); a `spec`-marked issue without tickets → the to-tickets runner (AFK decomposition, tickets get `ready-for-agent` immediately); a child-of-spec Ticket → the v2 implement runner (branch only, no PR — the merger integrates waves and closes tickets); a standalone issue → the classic chain (draft PR + review + auto-merge). |
 | `agent:implement` | PRs | `agent-implement-pr.yml` | Processes review feedback: replies to threads, addresses inline comments, pushes with a lease. |
 | `agent:review` | PRs | `agent-review.yml` | On success marks the PR ready and requests a squash auto-merge (ADR 0011) — held with a comment when the review posted inline comments or CI is not green. |
 | `agent:update-branch` | PRs | `agent-update-branch.yml` | Always resolves merge conflicts with `main`, never aborts. |

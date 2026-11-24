@@ -93,4 +93,13 @@ describe("implement pass parent context", () => {
     expect(script).toContain("exploration-notes:");
     expect(prompt).toContain("{{NOTES}}");
   });
+
+  it("ships Spec Tickets without a PR in the v2 flow (ADR 0019): no PR steps, no PR section", () => {
+    const prStep = workflow.slice(workflow.indexOf("Open draft PR"));
+    expect(prStep).toContain("steps.shape.outputs.parent_number == ''");
+    const reviewStep = workflow.slice(workflow.indexOf("Request automated review"));
+    expect(reviewStep).toContain("steps.shape.outputs.parent_number == ''");
+    expect(script).toContain("prompt-spec-ticket.md");
+    expect(script).toContain("isSpecTicket");
+  });
 });
