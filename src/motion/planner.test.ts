@@ -267,6 +267,42 @@ describe("planner seam: segment boundaries", () => {
     void tz;
   });
 
+  it("plans a chain of Point Moves as joint interpolation between the endpoint solutions", () => {
+    const traj = trajectory(vec3(80, 0, 60), [
+      point({ target: vec3(0, 113, 60), feed: 30 }),
+      point({ target: vec3(80, 40, 60), feed: 30 }),
+    ]);
+    const plan = planFromTrajectory(planner, model, traj);
+
+    // One range per Move, chaining end to start.
+    expect(plan.ranges.map((r) => r.segmentIndex)).toEqual([0, 1]);
+    // The motion starts at the Home solution and arrives at the last target.
+    const [hx, hy, hz] = model.forwardKinematics(plan.rows[0]!.q);
+    expect(hx).toBeCloseTo(80, 6);
+    expect(hy).toBeCloseTo(0, 6);
+    expect(hz).toBeCloseTo(60, 6);
+    const [tx, ty] = model.forwardKinematics(plan.rows[plan.rows.length - 1]!.q);
+    expect(tx).toBeCloseTo(80, 6);
+    expect(ty).toBeCloseTo(40, 6);
+    expectWithinDynamicLimits(model, plan);
+
+    // PTP: joints interpolate directly, so the TCP leaves the drawn
+    // chord mid-Move — only arrival at the target is guaranteed.
+    const firstEndMs = plan.ranges[0]!.endMs;
+    const interior = plan.rows.filter((row) => row.tMs > 0 && row.tMs < firstEndMs);
+    const mid = interior[Math.floor(interior.length / 2)]!;
+    const [mx, my] = model.forwardKinematics(mid.q);
+    // Distance from the straight chord (80,0) → (0,113).
+    const ax = 80;
+    const ay = 0;
+    const bx = 0;
+    const by = 113;
+    const t = ((mx - ax) * (bx - ax) + (my - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2);
+    const cx = ax + t * (bx - ax);
+    const cy = ay + t * (by - ay);
+    expect(Math.hypot(mx - cx, my - cy)).toBeGreaterThan(5);
+  });
+
   it("plans a Trajectory whose first Segment is a Point coinciding with Home", () => {
     // The Point stands in for the Home Point (within the merge distance):
     // its run contributes no motion, and the joined next Segment starts

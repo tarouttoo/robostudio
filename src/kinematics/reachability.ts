@@ -7,7 +7,9 @@
  *
  * A point maps its `IKResult` onto a three-valued status; a Segment is
  * sampled along its geometry (endpoints included) so a violation is
- * caught where it happens along the path, not only at its ends.
+ * caught where it happens along the path, not only at its ends. A PTP
+ * Move (a chained Point Segment) is exempt: only its target is checked,
+ * because only arrival there is guaranteed.
  */
 
 import {
@@ -69,22 +71,39 @@ export function checkPointReachability(model: RobotModel, p: Vec3): PointReachab
 }
 
 /**
+ * The Reachability violation at one 3D point, or null when the point
+ * admits joint angles within limits. This is the PTP Move check: only
+ * arrival at the target is guaranteed, so only the target is checked —
+ * the drawing UI uses it for the pending Move preview and the pipeline
+ * for the Move endpoints the Discretization emitted.
+ */
+export function checkPointViolation(model: RobotModel, p: Vec3): ReachabilityViolation | null {
+  const atMm: CoreVec3 = { x: p[0], y: p[1], z: p[2] };
+  const ik = model.inverseKinematics(p);
+  switch (ik.status) {
+    case "ok":
+      return null;
+    case "angle-limit":
+      return { status: "angle-limit", atMm, joint: ik.joint, bound: ik.bound };
+    case "unreachable":
+    case "fk-error":
+      return { status: "unreachable", atMm };
+  }
+}
+
+/**
  * Checks a Segment: samples its geometry at {@link SEGMENT_SAMPLE_STEP_MM}
- * spacing (endpoints included; a Point Segment by its target alone) and
- * returns the first violation, or null when the whole Segment admits
- * joint angles within limits.
+ * spacing (endpoints included; a Point Segment by its target alone — a
+ * PTP Move guarantees only arrival) and returns the first violation, or
+ * null when the whole Segment admits joint angles within limits.
  */
 export function checkSegmentReachability(
   model: RobotModel,
   segment: Segment,
 ): ReachabilityViolation | null {
   for (const p of segmentSamples(segment)) {
-    const ik = model.inverseKinematics([p.x, p.y, p.z]);
-    if (ik.status === "ok") continue;
-    if (ik.status === "angle-limit") {
-      return { status: "angle-limit", atMm: p, joint: ik.joint, bound: ik.bound };
-    }
-    return { status: "unreachable", atMm: p };
+    const violation = checkPointViolation(model, [p.x, p.y, p.z]);
+    if (violation !== null) return violation;
   }
   return null;
 }

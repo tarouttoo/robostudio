@@ -38,9 +38,11 @@ export interface LineSegment {
 }
 
 /**
- * A Segment that moves the pen to a target without drawing geometry
- * (starts a new sub-path). No plane, no intermediate geometry: the move
- * to the target is a point-to-point transit.
+ * A Segment that moves the pen to a target without drawing geometry.
+ * Points are chained: each Move starts where the previous Segment
+ * ended (the first at the Home Point) and travels as a PTP Move — only
+ * arrival at the target is guaranteed, so the Discretization samples
+ * the endpoints alone and Reachability is checked at the target only.
  */
 export interface PointSegment {
   readonly kind: "point";
@@ -107,7 +109,7 @@ export function line(spec: {
   return { kind: "line", start: spec.start, end: spec.end, feed: spec.feed };
 }
 
-/** Builds a Point Segment (pen move without drawn geometry). */
+/** Builds a Point Segment (a chained PTP Move without drawn geometry). */
 export function point(spec: { readonly target: Vec3; readonly feed: Feed }): PointSegment {
   assertFinitePoint(spec.target, "point target");
   assertPositiveFeed(spec.feed, "point");
@@ -124,7 +126,9 @@ export function trajectory(home: Vec3, segments: readonly Segment[]): Trajectory
 
 /**
  * The uniform start and end of any Segment: for Line and Arc the drawn
- * endpoints; for a Point both are its target (the pen jumps there).
+ * endpoints; for a Point both are its target — the Move's drawn
+ * geometry is the target alone, its start is the previous Segment's
+ * end (the Home Point first).
  */
 export function segmentEnds(seg: Segment): { readonly start: Vec3; readonly end: Vec3 } {
   switch (seg.kind) {

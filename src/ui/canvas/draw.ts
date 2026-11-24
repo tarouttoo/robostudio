@@ -1,10 +1,13 @@
 /**
  * Canvas scene rendering: draws the millimetre grid, the axes, the
- * committed Segments, the Home Point, and the pending Line draft from a
- * {@link CanvasScene}. All geometry flows through the canvas transform,
- * so what is drawn is exactly what the coordinates say (ADR 0007);
- * drawing happens in CSS pixels with the device pixel ratio applied as
- * the context transform, making the picture independent of the display.
+ * committed Segments, the Home Point, and the pending draft from a
+ * {@link CanvasScene}. Committed chained Point Moves draw dashed from
+ * where the previous Segment ended (the Home Point first), including
+ * the pending draft preview. All geometry flows through the canvas
+ * transform, so what is drawn is exactly what the coordinates say
+ * (ADR 0007); drawing happens in CSS pixels with the device pixel ratio
+ * applied as the context transform, making the picture independent of
+ * the display.
  */
 
 import {
@@ -98,9 +101,13 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: CanvasScene): vo
 
   drawReachability(ctx, transform, reachability);
   drawGrid(ctx, transform);
+  // The pen position: a chained Point Move draws from where the
+  // previous Segment ended, the first from the Home Point.
+  let pen = home;
   for (const [i, segment] of segments.entries()) {
     const violation = violations[i] ?? null;
-    drawSegment(ctx, transform, plane, segment, violation !== null);
+    drawSegment(ctx, transform, plane, segment, violation !== null, pen);
+    pen = segmentEnds(segment).end;
   }
   if (home !== null) drawHome(ctx, transform, plane, home, homeStatus === "ok");
   drawDraft(ctx, transform, draft, cursor, draftViolation !== null);
@@ -213,19 +220,35 @@ function project(transform: CanvasTransform, plane: WorkingPlane, p: Vec3): Vec2
   return transform.toScreen(vec2(coords.u, coords.v));
 }
 
-/** Draws one canonical Segment: Line as a stroke, Arc sampled, Point as a cross. */
+/** Projects a 3D world point into the current plane's (u, v) millimetres. */
+function planeVec2(plane: WorkingPlane, p: Vec3): Vec2 {
+  const coords = planeCoords(plane, p);
+  return vec2(coords.u, coords.v);
+}
+
+/**
+ * Draws one canonical Segment: Line as a stroke, Arc sampled, a Point
+ * as the dashed PTP Move from its start (where the previous Segment
+ * ended) plus a cross at the target.
+ */
 function drawSegment(
   ctx: CanvasRenderingContext2D,
   transform: CanvasTransform,
   plane: WorkingPlane,
   segment: Segment,
   violating: boolean,
+  moveStart: Vec3 | null,
 ): void {
   const color = violating ? VIOLATION_COLOR : COLORS.segment;
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 2;
   if (segment.kind === "point") {
+    // The PTP Move: dashed transit to the target — only arrival there
+    // is guaranteed, so only the endpoints draw.
+    if (moveStart !== null) {
+      dashedPolyline(ctx, transform, [planeVec2(plane, moveStart), planeVec2(plane, segment.target)]);
+    }
     drawCross(ctx, project(transform, plane, segment.target));
     return;
   }
@@ -270,9 +293,10 @@ function drawHome(
 }
 
 /**
- * Draws the pending draft: the start marker, a dashed guide to the
- * cursor, and — for an Arc draft — the preview Arc itself, so CW/CCW
- * and the chosen R or center are visible before the committing click.
+ * Draws the pending draft: the pending PTP Move as a dashed guide from
+ * the chain end to the cursor, or — for an Arc draft — the start
+ * marker, a dashed guide, and the preview Arc itself, so CW/CCW and
+ * the chosen R or center are visible before the committing click.
  */
 function drawDraft(
   ctx: CanvasRenderingContext2D,
@@ -282,20 +306,22 @@ function drawDraft(
   violating: boolean,
 ): void {
   if (draft === null) return;
-  const start = transform.toScreen(draft.start);
   const color = violating ? VIOLATION_COLOR : COLORS.draft;
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 1.5;
+  if (draft.kind === "ptp") {
+    // The pending Move: dashed from the chain end to the cursor. There
+    // is no pending click to mark — the preview follows the cursor.
+    if (cursor !== null) dashedPolyline(ctx, transform, [draft.start, cursor]);
+    return;
+  }
+  const start = transform.toScreen(draft.start);
   ctx.beginPath();
   ctx.arc(start.x, start.y, 4, 0, 2 * Math.PI);
   ctx.stroke();
   if (cursor === null) return;
 
-  if (draft.kind === "line") {
-    dashedPolyline(ctx, transform, [draft.start, cursor]);
-    return;
-  }
   if (draft.kind === "arcRadius") {
     // Guide chord, then the preview Arc when the radius resolves a center.
     dashedPolyline(ctx, transform, [draft.start, cursor]);

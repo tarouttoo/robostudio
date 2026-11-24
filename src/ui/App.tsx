@@ -6,6 +6,7 @@ import { APP_NAME, APP_VERSION } from "../core/version";
 import { bridge } from "./bridge";
 import {
   checkPointReachability,
+  checkPointViolation,
   checkSegmentReachability,
   type PointReachability,
   type ReachabilityViolation,
@@ -51,13 +52,15 @@ const generationSession = createGenerationSession(MIKO_MINI);
 
 /**
  * The trajectory editor: the operator picks the Working Plane with its
- * fixed coordinate, draws Line, Arc (R or center, CW/CCW), and Point
- * Segments on a millimetre grid — clicking or typing exact coordinates —
- * sets the Home Point, edits per-Segment Feeds, and can undo or clear.
- * Impossible Arcs are rejected at draw time with a readable message.
- * Drawn geometry is held as canonical Segments in the editor state (see
- * `editor.ts`); the canvas is a pure view over that state (ADR 0005,
- * ADR 0007). On «Сгенерировать» the drawn Trajectory runs through the
+ * fixed coordinate, places a chain of Point Segments — one click per
+ * PTP Move, chaining from the previous Segment's end (the first from
+ * the Home Point) — draws Arcs (R or center, CW/CCW), sets the Home
+ * Point, edits per-Segment Feeds, and can undo or clear. Impossible
+ * Arcs are rejected at draw time with a readable message; Reachability
+ * of a pending Move is checked at its target only. Drawn geometry is
+ * held as canonical Segments in the editor state (see `editor.ts`); the
+ * canvas is a pure view over that state (ADR 0005, ADR 0007). On
+ * «Сгенерировать» the drawn Trajectory runs through the
  * headless pipeline (the Generation session's `run`) and the validation stage log is
  * shown; a successful generation unlocks «Экспорт CSV», which writes
  * the Robot CSV and RViz CSV into an operator-picked folder through the
@@ -154,14 +157,19 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
     () => (state.home === null ? null : checkPointReachability(MIKO_MINI, [state.home.x, state.home.y, state.home.z])),
     [state.home],
   );
-  // The pending draft is checked against the hovered endpoint, so the
-  // preview turns red before the operator commits an unreachable Line.
+  // The pending draft is checked before the operator commits: an Arc
+  // draft along its approximate path, the Point tool's pending PTP Move
+  // at its target only — arrival is all a PTP Move guarantees.
   const draftViolation = useMemo<ReachabilityViolation | null>(() => {
-    if (state.draftStart === null || cursor === null) return null;
-    const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
+    if (cursor === null) return null;
     const end = planePoint(state.plane, cursor.x, cursor.y, state.fixedMm);
+    if (state.tool === "point") {
+      return checkPointViolation(MIKO_MINI, [end.x, end.y, end.z]);
+    }
+    if (state.draftStart === null) return null;
+    const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
     return checkSegmentReachability(MIKO_MINI, line({ start, end, feed: mmMinToMmS(state.feedMmMin) }));
-  }, [state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
+  }, [state.tool, state.draftStart, cursor, state.plane, state.fixedMm, state.feedMmMin]);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -216,9 +224,8 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
             <legend>Инструмент</legend>
             {(
               [
-                { tool: "line" as EditorTool, label: "Отрезок", hint: "два клика" },
+                { tool: "point" as EditorTool, label: "Точка", hint: "клик — точка в цепочке" },
                 { tool: "arc" as EditorTool, label: "Дуга", hint: "2–3 клика" },
-                { tool: "point" as EditorTool, label: "Точка", hint: "один клик" },
                 { tool: "home" as EditorTool, label: "Исходная точка", hint: "один клик" },
               ]
             ).map(({ tool, label, hint }) => (

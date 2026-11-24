@@ -3,7 +3,10 @@
  * fixed coordinate, the Feed, the active tool, the Home Point, and the
  * canonical Segments in draw order. A plain reducer over immutable
  * records — drawn geometry enters the state as canonical Segments built
- * by the core (`line`), never as screen coordinates.
+ * by the core (`point`), never as screen coordinates. Drawing places a
+ * chain of Points: every click of the Point tool adds a Point whose PTP
+ * Move starts where the previous Segment ended (the first at the Home
+ * Point).
  *
  * Unit conventions follow GLOSSARY.md: the UI works in mm/min (CNC
  * convention), the internal unit is mm/s; conversion happens here, in
@@ -15,10 +18,11 @@ import {
   arcFromRadius,
   CoreError,
   distance,
-  line,
   planeAxes,
+  planeCoords,
   planePoint,
   point,
+  segmentEnds,
   vec2,
   vec3,
   type ArcDirection,
@@ -33,8 +37,8 @@ import { DEFAULT_MIKO_MINI_HOME_MM } from "../kinematics/miko-mini";
 /** Arc travel direction, re-exported for the UI that configures it. */
 export type { ArcDirection };
 
-/** The active drawing tool: Line (two clicks), Arc, Point (one click), or Home Point (one click). */
-export type EditorTool = "line" | "arc" | "point" | "home";
+/** The active drawing tool: Point (one click per chained Point), Arc, or Home Point (one click). */
+export type EditorTool = "point" | "arc" | "home";
 
 /** How an Arc is defined: radius R (two clicks) or explicit center (three clicks, ADR 0005). */
 export type ArcMode = "radius" | "center";
@@ -88,12 +92,12 @@ export const DEFAULT_HOME_POINT = vec3(
   DEFAULT_MIKO_MINI_HOME_MM[2],
 );
 
-/** The initial editor state: XY plane at fixed 0, Line tool, default Home Point. */
+/** The initial editor state: XY plane at fixed 0, chained Point tool, default Home Point. */
 export const initialEditorState: EditorState = {
   plane: "XY",
   fixedMm: 0,
   feedMmMin: DEFAULT_FEED_MM_MIN,
-  tool: "line",
+  tool: "point",
   arcMode: "radius",
   arcDirection: "CCW",
   arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
@@ -129,13 +133,15 @@ export function mmMinToMmS(feedMmMin: number): number {
 }
 
 /**
- * The pending draft as the canvas view needs it: which clicks are done
- * and with which Arc parameters the next click would commit. A pure
- * projection of the editor state — the canvas holds no geometry state
- * itself (ADR 0007). Null when the active tool holds no draft.
+ * The pending draft as the canvas view needs it: the pending PTP Move
+ * the Point tool previews, and which Arc clicks are done with which
+ * parameters. A pure projection of the editor state — the canvas holds
+ * no geometry state itself (ADR 0007). Null when the active tool holds
+ * no draft.
  */
 export type DraftPreview =
-  | { readonly kind: "line"; readonly start: Vec2 }
+  /** The pending PTP Move: dashed from the chain end to the cursor. */
+  | { readonly kind: "ptp"; readonly start: Vec2 }
   | {
       readonly kind: "arcRadius";
       readonly start: Vec2;
@@ -149,30 +155,46 @@ export type DraftPreview =
       readonly direction: ArcDirection;
     };
 
+/**
+ * The pen position before the next Segment: the last committed
+ * Segment's end, or the Home Point before the first. Null while the
+ * Home Point is unset and nothing is drawn — a chained Move then has no
+ * start to preview from.
+ */
+export function chainEndOf(state: EditorState): Vec3 | null {
+  const last = state.segments.at(-1);
+  if (last !== undefined) return segmentEnds(last).end;
+  return state.home;
+}
+
 /** Projects the editor state onto the draft descriptor the canvas draws. */
 export function draftPreviewOf(state: EditorState): DraftPreview | null {
-  if (state.draftStart === null) return null;
-  switch (state.tool) {
-    case "line":
-      return { kind: "line", start: state.draftStart };
-    case "arc":
-      return state.arcMode === "radius"
-        ? {
-            kind: "arcRadius",
-            start: state.draftStart,
-            radiusMm: state.arcRadiusMm,
-            direction: state.arcDirection,
-          }
-        : {
-            kind: "arcCenter",
-            start: state.draftStart,
-            center: state.draftCenter,
-            direction: state.arcDirection,
-          };
-    default:
-      // One-click tools (Home Point, Point) commit immediately — no draft.
-      return null;
+  if (state.tool === "point") {
+    // The pending PTP Move: from the chain end (previous Segment's end,
+    // the Home Point first), projected into the plane's millimetres.
+    const pen = chainEndOf(state);
+    if (pen === null) return null;
+    const coords = planeCoords(state.plane, pen);
+    return { kind: "ptp", start: vec2(coords.u, coords.v) };
   }
+  if (state.draftStart === null) return null;
+  if (state.tool === "arc") {
+    return state.arcMode === "radius"
+      ? {
+          kind: "arcRadius",
+          start: state.draftStart,
+          radiusMm: state.arcRadiusMm,
+          direction: state.arcDirection,
+        }
+      : {
+          kind: "arcCenter",
+          start: state.draftStart,
+          center: state.draftCenter,
+          direction: state.arcDirection,
+        };
+  }
+  // The Home Point tool commits immediately — no draft.
+  return null;
 }
 
 /** Converts an internal Feed in mm/s to the UI's mm/min. */
@@ -231,12 +253,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const uv = vec2(u, v);
       const target = planePoint(state.plane, u, v, state.fixedMm);
       if (state.tool === "home") return { ...state, home: target, error: null };
-      if (state.tool === "point") {
-        const segment = point({ target, feed: mmMinToMmS(state.feedMmMin) });
-        return { ...state, segments: [...state.segments, segment], error: null };
-      }
       if (state.tool === "arc") return arcClick(state, uv, target);
-      return lineClick(state, uv, target);
+      // The Point tool: every click commits one more Point in the chain,
+      // a PTP Move to the target without drawn geometry.
+      const segment = point({ target, feed: mmMinToMmS(state.feedMmMin) });
+      return { ...state, segments: [...state.segments, segment], error: null };
     }
     case "numericEntry":
       // Typed coordinates are exact clicks: they enter the same draft
@@ -286,17 +307,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         error: null,
       };
   }
-}
-
-/**
- * Advances a Line draft: the first click pends, the second commits a
- * canonical Line built by the core.
- */
-function lineClick(state: EditorState, uv: Vec2, target: Vec3): EditorState {
-  if (state.draftStart === null) return { ...state, draftStart: uv, error: null };
-  const start = planePoint(state.plane, state.draftStart.x, state.draftStart.y, state.fixedMm);
-  const segment = line({ start, end: target, feed: mmMinToMmS(state.feedMmMin) });
-  return { ...state, segments: [...state.segments, segment], draftStart: null, error: null };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { planeCoords } from "../core";
-import { line as coreLine, vec2, vec3 } from "../core";
+import { point as corePoint, vec2, vec3 } from "../core";
 import { checkPointReachability } from "../kinematics/reachability";
 import { type ProjectContent } from "../project";
 import {
@@ -23,18 +23,23 @@ function click(state: EditorState, u: number, v: number): EditorState {
   return editorReducer(state, { type: "canvasClick", u, v });
 }
 
-/** Draws a Line with two clicks, returning the resulting state. */
-function drawLine(state: EditorState, u1: number, v1: number, u2: number, v2: number): EditorState {
-  return click(click(state, u1, v1), u2, v2);
+/** Places a chained Point with one click (the initial tool is the Point tool). */
+function placePoint(state: EditorState, u: number, v: number): EditorState {
+  return click(state, u, v);
+}
+
+/** Draws an Arc (radius mode, R = 10 mm) with two clicks, returning the resulting state. */
+function drawArc(state: EditorState, u1: number, v1: number, u2: number, v2: number): EditorState {
+  return click(click({ ...state, tool: "arc", arcRadiusMm: 10 }, u1, v1), u2, v2);
 }
 
 describe("editor state", () => {
-  it("starts on the XY plane at fixed 0 with a default feed, the default Home Point, and no Segments", () => {
+  it("starts on the XY plane at fixed 0 with a default feed, the default Home Point, the chained Point tool, and no Segments", () => {
     expect(initialEditorState).toEqual({
       plane: "XY",
       fixedMm: 0,
       feedMmMin: DEFAULT_FEED_MM_MIN,
-      tool: "line",
+      tool: "point",
       arcMode: "radius",
       arcDirection: "CCW",
       arcRadiusMm: DEFAULT_ARC_RADIUS_MM,
@@ -56,54 +61,56 @@ describe("editor state", () => {
     expect(checkPointReachability(MIKO_MINI, [home.x, home.y, home.z])).toBe("ok");
   });
 
-  it("commits a canonical Line Segment after two clicks, on the plane", () => {
-    const state = drawLine({ ...initialEditorState, fixedMm: 2 }, 10, 5, -3.5, 40);
-    expect(state.segments).toHaveLength(1);
-    const seg = state.segments[0]!;
-    expect(seg.kind).toBe("line");
-    if (seg.kind !== "line") return;
-    expect(seg.start).toEqual({ x: 10, y: 5, z: 2 });
-    expect(seg.end).toEqual({ x: -3.5, y: 40, z: 2 });
-    expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
-    // The draft is consumed by the commit.
+  it("places a chain of Points: every click appends one Point Segment, on the plane", () => {
+    const state = placePoint(placePoint({ ...initialEditorState, fixedMm: 2 }, 10, 5), -3.5, 40);
+    expect(state.segments).toHaveLength(2);
+    const first = state.segments[0]!;
+    const second = state.segments[1]!;
+    expect(first.kind).toBe("point");
+    expect(second.kind).toBe("point");
+    if (first.kind !== "point" || second.kind !== "point") return;
+    expect(first.target).toEqual({ x: 10, y: 5, z: 2 });
+    expect(second.target).toEqual({ x: -3.5, y: 40, z: 2 });
+    expect(first.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+    expect(second.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+    // One-click commits hold no draft.
     expect(state.draftStart).toBeNull();
   });
 
-  it("keeps the draft pending after the first click", () => {
-    const state = click(initialEditorState, 10, 20);
+  it("keeps an Arc draft pending after the first click", () => {
+    const state = click({ ...initialEditorState, tool: "arc" }, 10, 20);
     expect(state.segments).toHaveLength(0);
     expect(state.draftStart).toEqual(vec2(10, 20));
   });
 
   it("stacks Segments in draw order", () => {
-    let state = drawLine(initialEditorState, 0, 0, 10, 0);
-    state = drawLine(state, 10, 0, 10, 10);
+    let state = placePoint(initialEditorState, 0, 0);
+    state = placePoint(state, 10, 10);
     expect(state.segments).toHaveLength(2);
-    expect(state.segments[0]!.kind === "line" && state.segments[0]!.start.x).toBe(0);
-    expect(state.segments[1]!.kind === "line" && state.segments[1]!.end.y).toBe(10);
+    const first = state.segments[0]!;
+    const second = state.segments[1]!;
+    expect(first.kind === "point" && first.target).toEqual({ x: 0, y: 0, z: 0 });
+    expect(second.kind === "point" && second.target).toEqual({ x: 10, y: 10, z: 0 });
   });
 
   for (const plane of ["XY", "XZ", "YZ"] as const) {
     it(`draws on the ${plane} plane: plane switching updates which coordinate is fixed`, () => {
       // Draw on XY at z = 2, switch planes keeping the same fixed value,
-      // and draw again: the new Line is fixed on the new plane's w axis.
-      const onXY = drawLine({ ...initialEditorState, plane: "XY", fixedMm: 2 }, 0, 0, 10, 20);
+      // and place again: the new Point is fixed on the new plane's w axis.
+      const onXY = placePoint({ ...initialEditorState, plane: "XY", fixedMm: 2 }, 5, 9);
       const switched = editorReducer(onXY, { type: "setPlane", plane });
-      const onNew = drawLine(switched, 1, 2, 3, 4);
+      const onNew = placePoint(switched, 1, 2);
       const seg = onNew.segments[1]!;
-      expect(seg.kind).toBe("line");
-      if (seg.kind !== "line") return;
-      const w = planeCoords(plane, seg.start).w;
+      expect(seg.kind).toBe("point");
+      if (seg.kind !== "point") return;
       const expectedAxis = { XY: "z", XZ: "y", YZ: "x" }[plane];
-      expect(planeCoords(plane, seg.end).w).toBe(2);
-      expect(seg.start[expectedAxis as "x" | "y" | "z"]).toBe(2);
-      expect(seg.end[expectedAxis as "x" | "y" | "z"]).toBe(2);
-      expect(w).toBe(2);
+      expect(planeCoords(plane, seg.target).w).toBe(2);
+      expect(seg.target[expectedAxis as "x" | "y" | "z"]).toBe(2);
     });
   }
 
   it("cancels the draft when the Working Plane changes", () => {
-    const drafting = click(initialEditorState, 5, 5);
+    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
     const switched = editorReducer(drafting, { type: "setPlane", plane: "YZ" });
     expect(switched.plane).toBe("YZ");
     expect(switched.draftStart).toBeNull();
@@ -117,11 +124,12 @@ describe("editor state", () => {
   });
 
   it("undo removes the last Segment and keeps earlier ones", () => {
-    let state = drawLine(initialEditorState, 0, 0, 10, 0);
-    state = drawLine(state, 10, 0, 10, 10);
+    let state = placePoint(initialEditorState, 0, 0);
+    state = placePoint(state, 10, 10);
     const undone = editorReducer(state, { type: "undo" });
     expect(undone.segments).toHaveLength(1);
-    expect(undone.segments[0]!.kind === "line" && undone.segments[0]!.end).toEqual({ x: 10, y: 0, z: 0 });
+    const kept = undone.segments[0]!;
+    expect(kept.kind === "point" && kept.target).toEqual({ x: 0, y: 0, z: 0 });
     const undoneTwice = editorReducer(undone, { type: "undo" });
     expect(undoneTwice.segments).toHaveLength(0);
     // Undo on an empty canvas is a no-op, not an error.
@@ -132,7 +140,7 @@ describe("editor state", () => {
   it("undo does not remove the Home Point", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "home" });
     state = click(state, 1, 2);
-    state = drawLine({ ...state, tool: "line" }, 0, 0, 5, 5);
+    state = placePoint({ ...state, tool: "point" }, 0, 0);
     const undone = editorReducer(state, { type: "undo" });
     expect(undone.segments).toHaveLength(0);
     expect(undone.home).toEqual({ x: 1, y: 2, z: 0 });
@@ -141,7 +149,9 @@ describe("editor state", () => {
   it("clear empties the canvas: Segments and draft, restoring the default Home Point", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "home" });
     state = click(state, 1, 2);
-    state = { ...drawLine({ ...state, tool: "line" }, 0, 0, 5, 5), draftStart: vec2(9, 9) };
+    state = placePoint({ ...state, tool: "point" }, 0, 0);
+    // A pending Arc draft is dropped by the clear too.
+    state = click({ ...state, tool: "arc" }, 9, 9);
     const cleared = editorReducer(state, { type: "clear" });
     expect(cleared.segments).toEqual([]);
     expect(cleared.home).toEqual(DEFAULT_HOME_POINT);
@@ -168,12 +178,12 @@ describe("editor state", () => {
   });
 
   it("switching tools cancels a pending draft", () => {
-    const drafting = click(initialEditorState, 5, 5);
+    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
     const toHome = editorReducer(drafting, { type: "setTool", tool: "home" });
     expect(toHome.draftStart).toBeNull();
   });
 
-  it("Point tool commits a Point Segment with one click: the pen moves without drawn geometry", () => {
+  it("Point tool commits a Point Segment with one click: a PTP Move to the target without drawn geometry", () => {
     let state = editorReducer(initialEditorState, { type: "setTool", tool: "point" });
     state = click(state, 3.25, -1.5);
     expect(state.segments).toHaveLength(1);
@@ -182,7 +192,7 @@ describe("editor state", () => {
     if (seg.kind !== "point") return;
     expect(seg.target).toEqual({ x: 3.25, y: -1.5, z: 0 });
     expect(seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
-    // A Point has no draft: the next click starts fresh.
+    // A Point has no draft: the next click places the next Point in the chain.
     expect(state.draftStart).toBeNull();
   });
 
@@ -371,14 +381,11 @@ describe("editor state", () => {
   });
 
   it("numeric entry commits exactly like a click, landing the typed coordinates exactly", () => {
-    const drafting = editorReducer(initialEditorState, { type: "numericEntry", u: 0.123456789, v: -45.5 });
-    expect(drafting.draftStart).toEqual(vec2(0.123456789, -45.5));
-    const done = editorReducer(drafting, { type: "numericEntry", u: 12.75, v: 3 });
+    const done = editorReducer(initialEditorState, { type: "numericEntry", u: 0.123456789, v: -45.5 });
     const seg = done.segments[0]!;
-    expect(seg.kind).toBe("line");
-    if (seg.kind !== "line") return;
-    expect(seg.start).toEqual({ x: 0.123456789, y: -45.5, z: 0 });
-    expect(seg.end).toEqual({ x: 12.75, y: 3, z: 0 });
+    expect(seg.kind).toBe("point");
+    if (seg.kind !== "point") return;
+    expect(seg.target).toEqual({ x: 0.123456789, y: -45.5, z: 0 });
   });
 
   it("numeric entry sets the Home Point exactly in home mode", () => {
@@ -409,11 +416,9 @@ describe("editor state", () => {
   });
 
   it("edits one Segment's Feed in mm/min without touching the others", () => {
-    let state = drawLine(initialEditorState, 0, 0, 10, 0);
-    state = editorReducer(state, { type: "setTool", tool: "point" });
-    state = click(state, 20, 0);
-    state = editorReducer(state, { type: "setTool", tool: "line" });
-    state = drawLine(state, 20, 0, 30, 0);
+    let state = placePoint(initialEditorState, 0, 0);
+    state = placePoint(state, 20, 0);
+    state = placePoint(state, 30, 0);
     const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 1, raw: "300" });
     const feeds = edited.segments.map((s) => mmSToMmMin(s.feed));
     expect(feeds).toEqual([mmSToMmMin(mmMinToMmS(DEFAULT_FEED_MM_MIN)), 300, mmSToMmMin(mmMinToMmS(DEFAULT_FEED_MM_MIN))]);
@@ -433,7 +438,7 @@ describe("editor state", () => {
   });
 
   it("keeps a Segment's Feed on invalid input", () => {
-    const state = drawLine(initialEditorState, 0, 0, 10, 0);
+    const state = placePoint(initialEditorState, 0, 0);
     for (const raw of ["", "abc", "0", "-5", "NaN"]) {
       const edited = editorReducer(state, { type: "setSegmentFeedMmMin", index: 0, raw });
       expect(edited.segments[0]!.feed).toBe(state.segments[0]!.feed);
@@ -441,17 +446,20 @@ describe("editor state", () => {
   });
 
   it("ignores a Feed edit for an unknown Segment index", () => {
-    const state = drawLine(initialEditorState, 0, 0, 10, 0);
+    const state = placePoint(initialEditorState, 0, 0);
     expect(editorReducer(state, { type: "setSegmentFeedMmMin", index: 5, raw: "300" })).toBe(state);
     expect(editorReducer(state, { type: "setSegmentFeedMmMin", index: -1, raw: "300" })).toBe(state);
   });
 
   it("draftPreviewOf describes the pending draft for the canvas view", () => {
-    // No draft: null.
-    expect(draftPreviewOf(initialEditorState)).toBeNull();
-    // A pending Line draft.
-    const lineDraft = click(initialEditorState, 1, 2);
-    expect(draftPreviewOf(lineDraft)).toEqual({ kind: "line", start: vec2(1, 2) });
+    // The Point tool previews the pending Move: dashed from the chain
+    // end, the Home Point before the first Segment, to the cursor.
+    expect(draftPreviewOf(initialEditorState)).toEqual({ kind: "ptp", start: vec2(213, 0) });
+    // After placed Points the preview chains from the last target.
+    const chained = placePoint(placePoint(initialEditorState, 0, 0), 10, 4);
+    expect(draftPreviewOf(chained)).toEqual({ kind: "ptp", start: vec2(10, 4) });
+    // No Home Point and nothing drawn: no Move to preview.
+    expect(draftPreviewOf({ ...initialEditorState, home: null })).toBeNull();
     // A pending radius-mode Arc draft carries radius and direction.
     const arcDraft = click({ ...initialEditorState, tool: "arc", arcRadiusMm: 14, arcDirection: "CW" }, 3, 4);
     expect(draftPreviewOf(arcDraft)).toEqual({
@@ -465,15 +473,25 @@ describe("editor state", () => {
     expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: null, direction: "CW" });
     centerDraft = click(centerDraft, 6, 1);
     expect(draftPreviewOf(centerDraft)).toEqual({ kind: "arcCenter", start: vec2(1, 1), center: vec2(6, 1), direction: "CW" });
-    // One-click tools hold no draft.
+    // The Home Point tool holds no draft.
     const homeState = editorReducer({ ...initialEditorState, tool: "home" }, { type: "canvasClick", u: 5, v: 5 });
     expect(draftPreviewOf(homeState)).toBeNull();
-    const pointState = editorReducer({ ...initialEditorState, tool: "point" }, { type: "canvasClick", u: 5, v: 5 });
-    expect(draftPreviewOf(pointState)).toBeNull();
+  });
+
+  it("chains the Move preview to an Arc's end: Points continue where the Arc finished", () => {
+    const drawn = drawArc(initialEditorState, 0, 0, 8, 0);
+    expect(drawn.segments).toHaveLength(1);
+    // Back to the Point tool: the pending Move starts at the Arc's end,
+    // not at the Home Point.
+    const chaining = editorReducer(drawn, { type: "setTool", tool: "point" });
+    const preview = draftPreviewOf(chaining);
+    expect(preview).not.toBeNull();
+    if (preview === null || preview.kind !== "ptp") return;
+    expect(preview.start).toEqual(vec2(8, 0));
   });
 
   it("cancelDraft drops a pending draft without committing a Segment", () => {
-    const drafting = click(initialEditorState, 5, 5);
+    const drafting = click({ ...initialEditorState, tool: "arc" }, 5, 5);
     const cancelled = editorReducer(drafting, { type: "cancelDraft" });
     expect(cancelled.draftStart).toBeNull();
     expect(cancelled.segments).toHaveLength(0);
@@ -482,8 +500,9 @@ describe("editor state", () => {
   it("accepts a new feed in mm/min and draws with it (converted to mm/s)", () => {
     const state = editorReducer(initialEditorState, { type: "setFeedMmMin", raw: "600" });
     expect(state.feedMmMin).toBe(600);
-    const drawn = drawLine(state, 0, 0, 10, 0);
-    expect(drawn.segments[0]!.kind === "line" && drawn.segments[0]!.feed).toBe(10);
+    const drawn = placePoint(state, 10, 0);
+    const seg = drawn.segments[0]!;
+    expect(seg.kind === "point" && seg.feed).toBe(10);
   });
 
   it("rejects invalid feed inputs: empty, NaN, zero, negative", () => {
@@ -514,28 +533,28 @@ describe("editor state", () => {
   });
 
   it("stores the feed of every Segment so each carries its own Feed", () => {
-    let state = drawLine(initialEditorState, 0, 0, 10, 0);
+    let state = placePoint(initialEditorState, 0, 0);
     state = editorReducer(state, { type: "setFeedMmMin", raw: "300" });
-    state = drawLine(state, 10, 0, 10, 10);
-    const feeds = state.segments.map((s) => (s.kind === "line" ? s.feed : Number.NaN));
+    state = placePoint(state, 10, 10);
+    const feeds = state.segments.map((s) => (s.kind === "point" ? s.feed : Number.NaN));
     expect(feeds).toEqual([mmMinToMmS(DEFAULT_FEED_MM_MIN), 5]);
   });
 
   it("is a pure function: the same action yields the same state", () => {
-    const a = drawLine(initialEditorState, 1, 2, 3, 4);
-    const b = drawLine(initialEditorState, 1, 2, 3, 4);
+    const a = placePoint(initialEditorState, 1, 2);
+    const b = placePoint(initialEditorState, 1, 2);
     expect(b).toEqual(a);
     expect(initialEditorState.segments).toHaveLength(0);
   });
 });
 
 describe("Project File content", () => {
-  /** Builds a content with one Line, as the serializer would store it. */
+  /** Builds a content with one Point, as the serializer would store it. */
   function content(): ProjectContent {
     return {
       view: { plane: "XZ", fixedMm: 4, feedMmMin: 600 },
       home: vec3(1, 4, 2),
-      segments: [coreLine({ start: vec3(0, 4, 0), end: vec3(10, 4, 0), feed: 10 })],
+      segments: [corePoint({ target: vec3(10, 4, 0), feed: 10 })],
     };
   }
 
@@ -545,8 +564,8 @@ describe("Project File content", () => {
       { type: "setTool", tool: "home" },
     );
     state = click(state, 1, 2);
-    state = editorReducer(state, { type: "setTool", tool: "line" });
-    state = drawLine(state, 0, 0, 10, 0);
+    state = editorReducer(state, { type: "setTool", tool: "point" });
+    state = placePoint(state, 10, 0);
     expect(projectContentOf(state)).toEqual(content());
   });
 
@@ -562,7 +581,7 @@ describe("Project File content", () => {
   });
 
   it("loadProject replaces previous geometry and allows an unset Home Point", () => {
-    const drawn = drawLine(drawLine(initialEditorState, 0, 0, 5, 5), 5, 5, 10, 10);
+    const drawn = placePoint(placePoint(placePoint(initialEditorState, 0, 0), 5, 5), 10, 10);
     const restored = editorReducer(drawn, {
       type: "loadProject",
       content: { view: { plane: "XY", fixedMm: 0, feedMmMin: 1200 }, home: null, segments: [] },

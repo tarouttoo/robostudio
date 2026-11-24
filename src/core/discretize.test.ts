@@ -208,6 +208,23 @@ describe("transits", () => {
     expect(path.totalLengthMm).toBeCloseTo(20, 10);
   });
 
+  it("samples a chain of Point Moves at the endpoint poses only", () => {
+    const traj = trajectory(vec3(0, 0, 0), [
+      point({ target: vec3(10, 0, 0), feed: 15 }),
+      point({ target: vec3(10, 10, 0), feed: 15 }),
+    ]);
+    const path = discretizeTrajectory(traj);
+    // Exactly three poses: the Home start and both Move targets — no
+    // per-sample path points, so IK and Reachability see endpoints only.
+    expect(path.samples.map((s) => s.position)).toEqual([
+      vec3(0, 0, 0),
+      vec3(10, 0, 0),
+      vec3(10, 10, 0),
+    ]);
+    expect(path.samples.map((s) => s.segmentIndex)).toEqual([0, 0, 1]);
+    expect(path.totalLengthMm).toBeCloseTo(20, 10);
+  });
+
   it("emits no sample for a Point whose target merges with the join", () => {
     const traj = trajectory(vec3(0, 0, 0), [
       line({ start: vec3(0, 0, 0), end: vec3(10, 0, 0), feed: 10 }),
