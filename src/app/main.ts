@@ -57,7 +57,7 @@ function registerIpc(): void {
   const exportDialogs: ExportDialogs = {
     showDirectory: () => {
       const options: OpenDialogOptions = {
-        title: "Экспорт CSV: выберите папку",
+        title: "Экспорт: выберите папку",
         properties: ["openDirectory", "createDirectory"],
       };
       const owner = parent();
