@@ -16,13 +16,20 @@
  *   advance the path — a joined zero-length Segment contributes none.
  * - `pathLengthMm` is cumulative pen travel from the Home Point:
  *   analytic along each Segment's geometry, Euclidean across transits.
- *   Transits — the approach from Home, gaps between Segments, and Point
- *   moves — are single-sample hops and are counted at full distance.
+ *   Transits — the approach from Home, gaps between Segments, and PTP
+ *   Moves (a LIN Move is sampled along its line like drawn geometry,
+ *   see the Motion Type bullet below) — are single-sample hops and are
+ *   counted at full distance.
  * - The first sample of a non-empty path is the pen start pose
  *   (Home, or the first Segment's start when it coincides with Home
  *   within the merge distance).
  * - Every sample carries the Feed (mm/s) and index of the Segment being
  *   traversed; a merged Point changes no geometry and emits no sample.
+ * - A Point Move travels by its Motion Type (ADR 0017): a LIN Move is
+ *   sampled along the drawn straight line from the chain end to the
+ *   target at the same `maxStepMm` spacing as drawn geometry; a PTP
+ *   Move is sampled at its endpoint poses only (the chain end kept
+ *   when it is not on file yet, then the target).
  * - Non-finite geometry (a NaN or infinite Home, target, or Segment
  *   coordinate) is rejected with an `InvalidCoordinate` `CoreError`:
  *   sampling it would drop the Segment silently (NaN length) or never
@@ -105,6 +112,29 @@ export function discretizeTrajectory(
           "InvalidCoordinate",
           `segment ${index} (point) has a non-finite target (${seg.target.x}, ${seg.target.y}, ${seg.target.z})`,
         );
+      }
+      if (seg.motionType === "LIN") {
+        // A LIN Move follows the drawn straight line from the chain end
+        // to the target: per-sample like a Line of the same geometry
+        // (ADR 0017). A target merging with the join contributes no
+        // geometry, exactly like a joined Segment start.
+        if (hop > mergeDistanceMm) {
+          const n = Math.max(1, Math.ceil(hop / maxStepMm));
+          for (let i = 0; i <= n; i++) {
+            const f = i / n;
+            // The chain-end pose is already on file as the previous
+            // Segment's end (or the Home start); emit it only when the
+            // path is still empty.
+            if (i === 0 && samples.length > 0) continue;
+            emit(lerp(pen, seg.target, f), base + f * hop, seg.feed, index);
+          }
+          base += hop;
+        } else if (samples.length === 0) {
+          // The target stands in for the Home Point as the start pose.
+          emit(seg.target, base, seg.feed, index);
+        }
+        pen = seg.target;
+        return;
       }
       if (hop > mergeDistanceMm) {
         // Transit: keep the start pose when it is not on file yet, then

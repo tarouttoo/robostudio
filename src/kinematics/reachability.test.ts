@@ -120,9 +120,9 @@ describe("checkSegmentReachability", () => {
   });
 
   it("flags a Point Segment by its target alone", () => {
-    const inside = point({ target: vec3(100, 0, 60), feed });
+    const inside = point({ target: vec3(100, 0, 60), feed, motionType: "PTP" });
     expect(checkSegmentReachability(model, inside)).toBeNull();
-    const outside = point({ target: vec3(500, 0, 60), feed });
+    const outside = point({ target: vec3(500, 0, 60), feed, motionType: "PTP" });
     const violation = checkSegmentReachability(model, outside);
     expect(violation).not.toBeNull();
     if (violation === null) throw new Error("expected a violation");
@@ -134,10 +134,37 @@ describe("checkSegmentReachability", () => {
     // Only arrival is guaranteed: the check is the target alone. Here
     // the target sits inside the workspace while the straight line to it
     // crosses the unreachable zone — a Point Segment must not flag.
-    const target = point({ target: vec3(100, 0, 60), feed });
+    const target = point({ target: vec3(100, 0, 60), feed, motionType: "PTP" });
     const straight = line({ start: vec3(500, 0, 60), end: vec3(100, 0, 60), feed });
     expect(checkSegmentReachability(model, target)).toBeNull();
     expect(checkSegmentReachability(model, straight)).not.toBeNull();
+  });
+
+  it("a LIN Move is checked along the drawn straight line from its Move start", () => {
+    // The same geometry that a PTP Move shrugs off (above) is fatal for
+    // a LIN Move: it follows the drawn line, so the dead ground mid-path
+    // flags even though the target itself is reachable.
+    const lin = point({ target: vec3(100, 0, 60), feed, motionType: "LIN" });
+    const violation = checkSegmentReachability(model, lin, vec3(500, 0, 60));
+    expect(violation).not.toBeNull();
+    if (violation === null) throw new Error("expected a violation");
+    expect(violation.status).toBe("unreachable");
+  });
+
+  it("a fully reachable LIN Move passes with its Move start given", () => {
+    const lin = point({ target: vec3(150, 0, 60), feed, motionType: "LIN" });
+    expect(checkSegmentReachability(model, lin, vec3(100, 0, 60))).toBeNull();
+  });
+
+  it("a LIN Move flags an angle-limit violation mid-path by joint and bound", () => {
+    // The drawn line dives into the joint-limit-only zone behind the
+    // base axis above the shoulder (same zone as the Line test above).
+    const lin = point({ target: vec3(36, 0, 200), feed, motionType: "LIN" });
+    const violation = checkSegmentReachability(model, lin, vec3(56, 0, 200));
+    expect(violation).not.toBeNull();
+    if (violation?.status !== "angle-limit") throw new Error("expected an angle-limit violation");
+    expect(violation.joint).toBe("q2");
+    expect(violation.bound).toBe("max");
   });
 });
 

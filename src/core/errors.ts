@@ -10,6 +10,7 @@
 /** All error tags the core can fail with. */
 export type CoreErrorTag =
   | "InvalidFeed"
+  | "InvalidMotionType"
   | "InvalidArcRadius"
   | "InvalidCoordinate"
   | "ArcRadiusTooSmall"

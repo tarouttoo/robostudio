@@ -19,13 +19,25 @@ here.
   **CCW (против часовой)**. There is no three-point Arc; the center is
   never inferred from a middle click (ADR `0005`).
 - **Point (Точка)** — a Segment that moves the pen to a target without
-  drawing geometry, as a PTP Move from the previous Segment's end (the
-  first from the Home Point). The «Точка» tool places the chain: one
-  click per Point (ADR `0016`).
-- **PTP Move (PTP-перемещение)** — a Point Segment's travel: only
-  arrival at the target is guaranteed — the joints interpolate directly
-  between the endpoint solutions, the canvas draws the Move dashed,
-  and Reachability is checked at the target only (ADR `0016`).
+  drawing geometry, as a Move from the previous Segment's end (the
+  first from the Home Point). Each Point carries its own Motion Type —
+  LIN by default for new Points, PTP in Project Files written before
+  the Motion Type existed. The «Точка» tool places the chain: one
+  click per Point (ADR `0016`, ADR `0017`).
+- **Motion Type (Тип перемещения)** — how a Move travels: **LIN
+  (по прямой)** or **PTP (в точку)**. Each Point Segment carries its
+  own Motion Type, editable per Move in the segment list the way Feed
+  is; the toggle next to the drawing tools sets the type of the next
+  Move (ADR `0017`).
+- **LIN Move (LIN-перемещение)** — a Move that follows the drawn
+  straight line from its start to the target: per-sample
+  Discretization, IK and Reachability along the path, drawn solid —
+  exactly the path-following behavior the drawn geometry has (ADR
+  `0017`).
+- **PTP Move (PTP-перемещение)** — a Move that guarantees only arrival
+  at the target: the joints interpolate directly between the endpoint
+  solutions, the canvas draws the Move dashed, and Reachability is
+  checked at the target only (ADR `0016`, ADR `0017`).
 - **Working Plane (Рабочая плоскость)** — the plane the operator draws on:
   **XY**, **XZ**, or **YZ**, with the third coordinate fixed. CNC
   G17/G18/G19 conventions.

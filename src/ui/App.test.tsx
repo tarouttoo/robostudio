@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 
+import { point, vec3 } from "../core";
 import { App } from "./App";
 import { initialEditorState } from "./editor";
 
@@ -36,6 +37,38 @@ describe("app shell", () => {
     const html = renderToString(<App />);
     expect(html).toMatch(/<input type="radio" name="plane"[^>]*checked[^>]*value="XY"/);
     expect(html).toMatch(/<input type="radio" name="tool"[^>]*checked[^>]*value="point"/);
+  });
+
+  it("shows the Motion Type toggle next to the drawing tool, defaulting to LIN", () => {
+    const html = renderToString(<App />).replace(/<!-- -->/g, "");
+    // The toggle lives with the tools (ADR 0017): LIN (по прямой) and
+    // PTP (в точку), LIN checked by default.
+    expect(html).toContain("Тип перемещения");
+    expect(html).toContain("по прямой");
+    expect(html).toContain("в точку");
+    expect(html).toMatch(/<input type="radio" name="motionType"[^>]*checked[^>]*value="LIN"/);
+    expect(html).toMatch(/<input type="radio" name="motionType"[^>]*value="PTP"/);
+  });
+
+  it("hides the Motion Type toggle while the Arc tool is active", () => {
+    // Like the Arc definition options, the toggle belongs to the tool
+    // it configures: with the Arc tool active it is not shown.
+    const html = renderToString(<App initialState={{ ...initialEditorState, tool: "arc" }} />);
+    expect(html).not.toMatch(/name="motionType"/);
+  });
+
+  it("edits each Move's Motion Type in the segment list, like its Feed", () => {
+    const state = {
+      ...initialEditorState,
+      segments: [
+        point({ target: vec3(10, 0, 0), feed: 20, motionType: "LIN" }),
+        point({ target: vec3(20, 0, 0), feed: 20, motionType: "PTP" }),
+      ],
+    };
+    const html = renderToString(<App initialState={state} />).replace(/<!-- -->/g, "");
+    // Per-Move radios, aligned by index: LIN for Move 0, PTP for Move 1.
+    expect(html).toMatch(/name="motionType-0"[^>]*checked[^>]*value="LIN"/);
+    expect(html).toMatch(/name="motionType-1"[^>]*checked[^>]*value="PTP"/);
   });
 
   it("offers Project File save and open in the Файл проекта section", () => {
