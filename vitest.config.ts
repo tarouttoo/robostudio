@@ -12,5 +12,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}", ".sandcastle/**/*.test.ts", "docs/**/*.test.ts"],
+    // GIF-encoding tests render hundreds of frames (6–9 s by nature); the
+    // 5 s default turned them red under parallel load on slower machines.
+    // 30 s leaves headroom without masking real hangs.
+    testTimeout: 30_000,
   },
 });
