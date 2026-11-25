@@ -27,6 +27,11 @@ jobs:
       # .sandcastle/agent-workflows/shared/common.ts.
       AGENT_PROVIDER: zai
       AGENT_MODEL: glm-5.3-flash:max
+      # The provider plan caps simultaneous agent runs (empirically 3: a
+      # 4th and 5th died at start; the key is shared with the operator's
+      # local sessions). to-tickets validates the plan's widest wave
+      # against this.
+      AGENT_CONCURRENCY: "3"
 
     steps:
       # Route by issue shape (ADR 0019, delta №1): a Spec with Tickets goes

@@ -56,6 +56,17 @@ if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
   fail(`Invalid issue number: ${ISSUE_NUMBER}`);
 }
 
+// The provider plan caps simultaneous agent runs (empirically 3: a 4th and
+// 5th died at start; the key is shared with the operator's local sessions).
+// A plan wider than this would launch doomed runs, so its widest wave must
+// fit — the rejection feeds back to the agent for a staggered re-plan.
+const agentConcurrency = Number(process.env.AGENT_CONCURRENCY ?? "3");
+if (!Number.isInteger(agentConcurrency) || agentConcurrency <= 0) {
+  fail(
+    `AGENT_CONCURRENCY must be a positive integer, got "${String(process.env.AGENT_CONCURRENCY)}"`,
+  );
+}
+
 try {
   // Race guard: between routing and here the Spec may have grown tickets
   // (a parallel event). Sub-issue count > 0 means the exploration-notes
@@ -107,7 +118,7 @@ try {
     },
     output: sandcastle.Output.object({
       tag: "output",
-      schema: planSchema,
+      schema: planSchema({ maxWaveSize: agentConcurrency }),
     }),
     extractionPrompt: fs.readFileSync(
       path.join(import.meta.dirname, "extraction.md"),

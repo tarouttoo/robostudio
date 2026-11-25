@@ -160,6 +160,13 @@ surprising parts:
   `agent:review` (via `AGENT_PAT`), so the review pass and the auto-merge
   gate (ADR 0011 + 0014) run unchanged — the "single review pass" is that
   chain on the integration branch.
+- **The agent concurrency is a plan constraint, not a runtime queue**: the
+  provider plan allows ~3 simultaneous agent runs (a 4th and 5th died at
+  start on the first real to-tickets run), and the key is shared with the
+  operator's local sessions. to-tickets validates the plan's widest wave
+  against `AGENT_CONCURRENCY` and the rejection feeds back to the agent,
+  which staggers Tickets with blockedBy edges. A runtime slot gate in the
+  implement preflight is the return condition when Specs start overlapping.
 
 ## Build order
 

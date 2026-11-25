@@ -17,6 +17,12 @@ export interface PlanTicket {
   readonly blockedBy: readonly number[];
 }
 
+/** Constraints the plan must respect beyond well-formedness. */
+export interface PlanLimits {
+  /** How many Tickets may start as one wave (the agent concurrency). */
+  readonly maxWaveSize: number;
+}
+
 const asIndex = (value: unknown, label: string, size: number): number => {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`${label} must be an integer index`);
@@ -53,9 +59,13 @@ const asPlanTicket = (value: unknown, label: string, size: number): PlanTicket =
  * (`{"tickets": [...]}`). A plan with zero tickets throws: a Spec marked
  * for decomposition must decompose (the caller turns that into a blocked
  * run instead of looping). Self-references and cycles are rejected so the
- * frontier machinery never deadlocks.
+ * frontier machinery never deadlocks. The widest wave must fit the agent
+ * concurrency: a wider plan launches doomed parallel runs.
  */
-export const asTicketPlan = (value: unknown): readonly PlanTicket[] => {
+export const asTicketPlan = (
+  value: unknown,
+  limits: PlanLimits = { maxWaveSize: Number.POSITIVE_INFINITY },
+): readonly PlanTicket[] => {
   const raw = asArray(asRecord(value, "output").tickets ?? [], "tickets");
   if (raw.length === 0) {
     throw new Error("plan must decompose the Spec into at least one Ticket");
@@ -69,10 +79,12 @@ export const asTicketPlan = (value: unknown): readonly PlanTicket[] => {
     }
   }
   assertAcyclic(tickets);
+  assertWavesWithin(tickets, limits.maxWaveSize);
   return tickets;
 };
 
-export const planSchema = standardSchema<readonly PlanTicket[]>(asTicketPlan);
+export const planSchema = (limits: PlanLimits) =>
+  standardSchema<readonly PlanTicket[]>((value) => asTicketPlan(value, limits));
 
 /** DFS cycle check over the blocking edges. */
 const assertAcyclic = (tickets: readonly PlanTicket[]): void => {
@@ -87,6 +99,37 @@ const assertAcyclic = (tickets: readonly PlanTicket[]): void => {
     state[index] = 2;
   };
   for (let index = 0; index < tickets.length; index += 1) visit(index);
+};
+
+/**
+ * The widest frontier layer must fit the agent concurrency: a wider wave
+ * launches doomed parallel agent runs (the provider plan caps those).
+ */
+const assertWavesWithin = (
+  tickets: readonly PlanTicket[],
+  maxWaveSize: number,
+): void => {
+  const depth = new Array<number>(tickets.length).fill(-1);
+  const depthOf = (index: number): number => {
+    if (depth[index] === -1) {
+      depth[index] = tickets[index]!.blockedBy.reduce(
+        (max, blocker) => Math.max(max, depthOf(blocker) + 1),
+        0,
+      );
+    }
+    return depth[index]!;
+  };
+  const counts = new Map<number, number>();
+  for (let index = 0; index < tickets.length; index += 1) {
+    const level = depthOf(index);
+    counts.set(level, (counts.get(level) ?? 0) + 1);
+  }
+  const widest = Math.max(...counts.values());
+  if (widest > maxWaveSize) {
+    throw new Error(
+      `the plan's widest wave is ${widest} Tickets but the agent concurrency is ${maxWaveSize} — stagger Tickets with blockedBy edges so at most ${maxWaveSize} start at once`,
+    );
+  }
 };
 
 /** The ticket issue body: parent pointer first, then the agent's text. */

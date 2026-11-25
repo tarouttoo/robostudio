@@ -64,10 +64,33 @@ describe("asTicketPlan", () => {
   });
 
   it("exposes the standard schema interface", () => {
-    const ok = planSchema["~standard"].validate({ tickets: [ticket("A")] });
+    const ok = planSchema({ maxWaveSize: 3 })["~standard"].validate({
+      tickets: [ticket("A")],
+    });
     expect("value" in ok && ok.value).toHaveLength(1);
-    const bad = planSchema["~standard"].validate({ tickets: [] });
+    const bad = planSchema({ maxWaveSize: 3 })["~standard"].validate({
+      tickets: [],
+    });
     expect("issues" in bad).toBe(true);
+  });
+
+  it("rejects a plan whose widest wave exceeds the agent concurrency", () => {
+    expect(() =>
+      asTicketPlan(
+        { tickets: [ticket("A"), ticket("B"), ticket("C")] },
+        { maxWaveSize: 2 },
+      ),
+    ).toThrow(/widest wave/);
+  });
+
+  it("accepts the same plan staggered within the concurrency", () => {
+    const plan = asTicketPlan(
+      { tickets: [ticket("A"), ticket("B", [0]), ticket("C", [0])] },
+      { maxWaveSize: 2 },
+    );
+    expect(plan).toHaveLength(3);
+    expect(plan[1]!.blockedBy).toEqual([0]);
+    expect(plan[2]!.blockedBy).toEqual([0]);
   });
 });
 
