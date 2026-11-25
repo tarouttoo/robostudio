@@ -69,6 +69,16 @@ workflow stamps it into package.json before building, so the artifacts are
 named `robostudio-<version>-setup.exe`, `robostudio-<version>-win-portable.zip`
 and `robostudio-<version>-linux.zip`. Publishing the draft stays manual.
 
+### Web app (GitHub Pages)
+
+Every push to `main` also rebuilds the renderer and republishes the public
+site: <https://tarouttoo.github.io/robostudio/> (ADR 0024). This is the
+Web Deployment, not a Release: no tags, no draft, no manual publish — the
+site always mirrors the tip of `main`, gated by the same
+lint/typecheck/app-tests as CI. Everything computes in the visitor's
+browser; only the file-dialog operations (Export, project Save/Open)
+report themselves unavailable there.
+
 ## Agent pipeline
 
 This repo ships the label-driven agent pipeline from

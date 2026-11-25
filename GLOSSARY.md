@@ -176,6 +176,11 @@ see `docs/agents/`):
   workflow builds the packaging targets (ADR `0009`) into a **draft** GitHub
   release, and a human publishes it (a one-way door). The tag is the single
   source of truth for the version; `package.json` is not read.
+- **Web Deployment (Веб-деплой)** — the public browser build at
+  `https://tarouttoo.github.io/robostudio/`, rebuilt automatically on every
+  push to `main` (ADR `0024`). Unlike a Release: no tag, no draft, no manual
+  publish. Export and project Save/Open are unavailable in a plain browser —
+  the UI reports them as such instead of failing.
 - **Retro (Ретро)** — a human-invoked retrospective over factory runs
   (Actions run URLs in, factory-improvement PR out); harvests the review's
   "Rules this review wanted and could not find" into checks or standards.

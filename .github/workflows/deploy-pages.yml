@@ -1,0 +1,87 @@
+name: Deploy web
+
+# Web Deployment (ADR 0024): every push to main rebuilds the renderer and
+# republishes https://tarouttoo.github.io/robostudio/. Deliberately separate
+# from the Release channel (v* tags, draft, manual publish): no tags, no
+# draft, no human step — the site always mirrors the tip of main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; an in-flight deployment is never cancelled —
+# it would leave the site between versions (GitHub starter default).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: gate + build renderer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # `cache: npm` above does not cover the Electron binary that npm ci's
+      # postinstall downloads (@electron/get per-OS cache, same rationale
+      # as ci.yml).
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Same gate as CI and the release legs: the site ships outward, so
+      # unverified code must fail the run instead of being published.
+      - name: Lint and typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+
+      # A deployment ships the app, so it runs the app tests (the pipeline
+      # suites in `npm test` are agent infrastructure; same split as the
+      # release legs).
+      - name: Test (app)
+        run: npm run test:app
+
+      # Only the renderer goes to Pages: the site is the web channel of the
+      # same UI the Electron main process loads from dist/renderer (ADR
+      # 0003, ADR 0024). base is "./" already, so the /robostudio/ subpath
+      # works unchanged.
+      - name: Build the renderer
+        run: npm run build:renderer
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/renderer
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
