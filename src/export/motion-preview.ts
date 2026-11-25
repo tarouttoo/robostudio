@@ -12,35 +12,38 @@
  * (a PTP Move guarantees only arrival, so the real path is the FK
  * path, ADR 0016).
  *
- * The seam splits in two pure steps, so golden tests can pin the
- * projected frame geometry headlessly (the same discipline as the CSV
- * exporters' byte fixtures, ADR 0006):
+ * The seam splits in pure steps around the Preview Scene — the
+ * millimetre-space scene document `buildPreviewScene` assembles from
+ * the Trajectory + Motion Plan + Robot Model (see `preview-scene.ts`;
+ * its millimetre geometry is pinned by its own golden tests) — so
+ * golden tests can pin each step headlessly (the same discipline as
+ * the CSV exporters' byte fixtures, ADR 0006):
  *
- * 1. `renderMotionPreviewFrames` — Motion Plan + Trajectory + Robot
- *    Model in, projected pixel-space frame geometry out.
- * 2. `renderMotionPreviewGif` — the same frames rasterized onto a
+ * 1. `buildPreviewScene` — Trajectory + Motion Plan + Robot Model in,
+ *    the headless mm-space scene document out (per-Segment polylines
+ *    with per-sample schedule times, the ≤ 300 sampled moments with
+ *    their chain skeletons, the travelled extents, the PTP TCP trace
+ *    runs, the Home Point, and the scene bounds).
+ * 2. `renderMotionPreviewFrames` — the Preview Scene projected into
+ *    pixel-space frame geometry (a scene built fresh from the input,
+ *    or a prebuilt one passed in, yields the same frames).
+ * 3. `renderMotionPreviewGif` — the same frames rasterized onto a
  *    fixed palette and encoded as a GIF 89a by the pure-JS encoder in
  *    `gif.ts`.
  *
  * Frames sample at most `MOTION_PREVIEW_MAX_FRAMES` plan rows, evenly
- * paced over the plan's real duration.
+ * paced over the plan's real duration (the moment pacing lives in the
+ * scene assembly).
  */
 
-import { discretizeTrajectory, type DiscretizedPath } from "../core/discretize";
-import type { Segment, Trajectory } from "../core/trajectory";
-import type { Vec3 as CoreVec3 } from "../core/vec";
+import type { Trajectory } from "../core/trajectory";
 import type { RobotModel, Vec3 } from "../kinematics/robot-model";
-import type { MotionPlan, MotionRow } from "../motion/planner";
+import type { MotionPlan, PlanSegmentRange } from "../motion/planner";
 import { domain, projectIsometric } from "./charts";
 import { encodeGif, type GifColor, type GifFrame } from "./gif";
+import { buildPreviewScene, type PreviewScene } from "./preview-scene";
 
-/** Converts a core point (object shape) to the kinematics tuple shape. */
-function asTuple(p: CoreVec3): Vec3 {
-  return [p.x, p.y, p.z];
-}
-
-/** Frame budget: at most this many frames, evenly paced (the ~300 cap). */
-export const MOTION_PREVIEW_MAX_FRAMES = 300;
+export { MOTION_PREVIEW_MAX_FRAMES } from "./preview-scene";
 
 /** Frame size, in pixels. */
 export const MOTION_PREVIEW_WIDTH = 480;
@@ -99,10 +102,15 @@ export interface MotionPreviewInput {
   readonly plan: MotionPlan;
   /** The Robot Model solving the chain skeleton per frame. */
   readonly model: RobotModel;
+  /**
+   * Optional prebuilt Preview Scene: when given, the frames project
+   * this document instead of building one from `trajectory`/`plan`/
+   * `model` — the build-once-per-Generation path. Both paths project
+   * the same scene: a fresh build is exactly what the omitted field
+   * would have assembled.
+   */
+  readonly scene?: PreviewScene;
 }
-
-/** Slack on completion comparisons, absorbing float dust on range ends. */
-const TIME_SLACK_MS = 1e-9;
 
 /**
  * The preview's RGB colors, in {@link MOTION_PREVIEW_COLORS} order —
@@ -187,10 +195,11 @@ export function renderMotionPreviewGif(input: MotionPreviewInput): MotionPreview
  * first, then primitives in draw order (later draws over earlier).
  * Pure integer pixel math — no anti-aliasing, no floats in the pixel
  * buffer — so the bytes are exactly reproducible. This is the raster
- * step both consumers share: the GIF encoder encodes these pixels, and
- * the playback dialog paints these same palette indices (converted to
- * RGB through {@link MOTION_PREVIEW_PALETTE}), so what the dialog shows
- * is exactly what the exported GIF shows.
+ * step both current consumers share: the GIF encoder encodes these
+ * pixels, and the playback dialog paints these same palette indices
+ * (converted to RGB through {@link MOTION_PREVIEW_PALETTE}), so what
+ * the dialog shows is exactly what the exported GIF shows — two views
+ * of the one Preview Scene document.
  */
 export function rasterizePreviewFrame(frame: MotionPreviewFrame): Uint8Array {
   const pixels = new Uint8Array(MOTION_PREVIEW_WIDTH * MOTION_PREVIEW_HEIGHT);
@@ -285,40 +294,43 @@ function fillDisc(
  * isometrically (the path-3d chart's convention, ADR 0013) with one
  * uniform mm→px scale fit to the whole scene (equal aspect, ADR
  * 0007's anti-distortion discipline: equal millimetres draw as equal
- * pixels). Pure function; identical inputs yield identical frames.
+ * pixels). Consumes the Preview Scene: builds it from the input, or
+ * projects the prebuilt one passed in — the frames are the same either
+ * way. Pure function; identical inputs yield identical frames.
  */
 export function renderMotionPreviewFrames(input: MotionPreviewInput): readonly MotionPreviewFrame[] {
-  const sampledRows = samplePlanRows(input.plan);
-  if (sampledRows.length === 0) return [];
-
-  const path = discretizeTrajectory(input.trajectory);
-  const segmentPixels = segmentPolylines(path);
-  const ptpSegments = ptpSegmentIndices(input.trajectory.segments);
-
-  // The robot skeleton per sampled frame, in model-frame millimetres.
-  const chains = sampledRows.map((row) => input.model.chainPoints(row.q));
-
-  // The actual TCP trace under PTP: runs of consecutive sampled frames
-  // whose plan row traverses a PTP Move; the TCP positions come from
-  // per-frame forward kinematics (the last chain point).
-  const traceRuns = collectTraceRuns(sampledRows, ptpSegments);
+  const scene = input.scene ?? buildPreviewScene(input);
+  if (scene.moments.length === 0) return [];
 
   // The scene every frame must hold: trajectory, home, and the whole
   // robot sweep. One fit for all frames — the view never jitters.
-  const scenePoints: Vec3[] = [asTuple(input.trajectory.home)];
-  for (const polyline of segmentPixels.values()) scenePoints.push(...polyline.mm);
-  for (const chain of chains) scenePoints.push(...chain);
+  const scenePoints: Vec3[] = [scene.homeMm];
+  for (const segment of scene.segments) scenePoints.push(...segment.mm);
+  for (const moment of scene.moments) scenePoints.push(...moment.chainMm);
   const toPx = fitProjection(scenePoints);
-  const tcpPixels = chains.map((chain) => toPx(chain[chain.length - 1] as Vec3));
 
-  const trajectoryPrimitives = trajectoryPrimitivesOf(segmentPixels, ptpSegments, toPx);
+  const trajectoryPrimitives: PreviewPrimitive[] = [];
+  const segmentPixels = new Map<number, readonly (readonly [number, number])[]>();
+  for (const segment of scene.segments) {
+    const px = segment.mm.map(toPx);
+    segmentPixels.set(segment.segmentIndex, px);
+    trajectoryPrimitives.push({
+      kind: segment.isPtp ? "dashed" : "solid",
+      points: px,
+      colorIndex: MOTION_PREVIEW_COLORS.trajectory,
+      width: 1,
+    });
+  }
 
-  return sampledRows.map((row, frameIndex) => {
-    const chainMm = chains[frameIndex] as Vec3[];
+  // The actual TCP trace under PTP: projected per-frame forward
+  // kinematics positions, one polyline per scene trace run.
+  const tcpPixels = scene.moments.map((moment) => toPx(moment.tcpMm));
+
+  return scene.moments.map((moment, frameIndex) => {
     const primitives = [...trajectoryPrimitives];
-    appendTravelled(primitives, input.plan, row.tMs, chainMm[chainMm.length - 1] as Vec3, segmentPixels, ptpSegments);
-    appendTrace(primitives, traceRuns, frameIndex, tcpPixels);
-    const chainPx = chainMm.map(toPx);
+    appendTravelled(primitives, input.plan.ranges, moment.travelled, segmentPixels);
+    appendTrace(primitives, scene.traceRuns, frameIndex, tcpPixels);
+    const chainPx = moment.chainMm.map(toPx);
     primitives.push({ kind: "solid", points: chainPx, colorIndex: MOTION_PREVIEW_COLORS.robot, width: 2 });
     primitives.push({
       kind: "dot",
@@ -328,179 +340,17 @@ export function renderMotionPreviewFrames(input: MotionPreviewInput): readonly M
     });
     primitives.push({
       kind: "dot",
-      points: [toPx(asTuple(input.trajectory.home))],
+      points: [toPx(scene.homeMm)],
       colorIndex: MOTION_PREVIEW_COLORS.home,
       width: 3,
     });
-    return { tMs: row.tMs, primitives };
+    return { tMs: moment.tMs, primitives };
   });
 }
 
-/** Samples the plan rows: one frame per row, capped at the frame budget. */
-function samplePlanRows(plan: MotionPlan): readonly MotionRow[] {
-  const n = plan.rows.length;
-  if (n <= MOTION_PREVIEW_MAX_FRAMES) return plan.rows;
-  const last = n - 1;
-  return Array.from(
-    { length: MOTION_PREVIEW_MAX_FRAMES },
-    (_, i) => plan.rows[Math.round((i * last) / (MOTION_PREVIEW_MAX_FRAMES - 1))] as MotionRow,
-  );
-}
-
-/** The segment indices carrying a PTP Move (dashed; arrival only). */
-function ptpSegmentIndices(segments: readonly Segment[]): ReadonlySet<number> {
-  const set = new Set<number>();
-  segments.forEach((segment, index) => {
-    if (segment.kind === "point" && segment.motionType === "PTP") set.add(index);
-  });
-  return set;
-}
-
-/** Per-segment 3D polylines (filled with pixels once the fit exists). */
-interface SegmentPolyline {
-  /** The segment's sampled 3D positions, in traversal order, as tuples. */
-  readonly mm: readonly Vec3[];
-  /** The projected pixel points, filled by the caller's fit. */
-  px: readonly (readonly [number, number])[];
-}
-
 /**
- * Groups the discretized path's samples into per-Segment polylines.
- * Samples of one Segment form one consecutive run; a merged-away
- * Segment contributes no samples and no polyline.
+ * Appends the PTP TCP trace: every trace run up to `frameIndex`.
  */
-function segmentPolylines(path: DiscretizedPath): ReadonlyMap<number, SegmentPolyline> {
-  const polylines = new Map<number, SegmentPolyline>();
-  let currentIndex = -1;
-  let current: Vec3[] | undefined;
-  for (const sample of path.samples) {
-    if (sample.segmentIndex !== currentIndex || current === undefined) {
-      currentIndex = sample.segmentIndex;
-      current = [];
-      polylines.set(currentIndex, { mm: current, px: [] });
-    }
-    current.push(asTuple(sample.position));
-  }
-  return polylines;
-}
-
-/**
- * Runs of consecutive sampled frames traversing one PTP Move, as frame
- * index arrays. The TCP hop between two poses is real motion the plan
- * does not draw — the trace shows where the tool actually went.
- */
-function collectTraceRuns(rows: readonly MotionRow[], ptp: ReadonlySet<number>): readonly (readonly number[])[] {
-  const runs: number[][] = [];
-  let current: number[] | undefined;
-  let currentSegment = -1;
-  rows.forEach((row, index) => {
-    if (ptp.has(row.segmentIndex)) {
-      if (current !== undefined && currentSegment === row.segmentIndex) {
-        current.push(index);
-        return;
-      }
-      current = [index];
-      currentSegment = row.segmentIndex;
-      runs.push(current);
-      return;
-    }
-    current = undefined;
-    currentSegment = -1;
-  });
-  return runs;
-}
-
-/**
- * The full Trajectory: drawn geometry and LIN Moves solid, PTP Moves
- * dashed (only arrival is guaranteed, ADR 0017) — the same Motion
- * Type convention the canvas draws by.
- */
-function trajectoryPrimitivesOf(
-  segmentPixels: ReadonlyMap<number, SegmentPolyline>,
-  ptp: ReadonlySet<number>,
-  toPx: (p: Vec3) => [number, number],
-): readonly PreviewPrimitive[] {
-  const primitives: PreviewPrimitive[] = [];
-  for (const [segmentIndex, polyline] of segmentPixels) {
-    polyline.px = polyline.mm.map(toPx);
-    primitives.push({
-      kind: ptp.has(segmentIndex) ? "dashed" : "solid",
-      points: polyline.px,
-      colorIndex: MOTION_PREVIEW_COLORS.trajectory,
-      width: 1,
-    });
-  }
-  return primitives;
-}
-
-/**
- * Index of the polyline sample nearest `p` (3D millimetres, squared
- * distance — no sqrt needed for an argmin).
- */
-function nearestSample(polyline: SegmentPolyline, p: Vec3): number {
-  let nearest = 0;
-  let best = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < polyline.mm.length; i++) {
-    const s = polyline.mm[i] as Vec3;
-    const dx = s[0] - p[0];
-    const dy = s[1] - p[1];
-    const dz = s[2] - p[2];
-    const d = dx * dx + dy * dy + dz * dz;
-    if (d < best) {
-      best = d;
-      nearest = i;
-    }
-  }
-  return nearest;
-}
-
-/**
- * Appends the travelled-part highlight: for every plan range, the
- * drawn polyline up to where the pen actually is at `tMs` — the drawn
- * sample nearest the frame's forward-kinematics TCP (`tcpMm`). LIN
- * Moves track the drawn geometry exactly (ADR 0017), so the highlight
- * always ends where the frame's TCP marker sits, whatever pace the
- * Motion Profile keeps inside the range (the S-curve is nonlinear in
- * time, so a time-fraction cut would visibly lead or trail the pen —
- * the same honesty the PTP trace is drawn for, ADR 0016). A PTP Move
- * contributes no highlight — only arrival is guaranteed, and the
- * travelled reality is the TCP trace. Completion is judged against
- * `min(endMs, durationMs)`: the grid-rounded `durationMs` can sit one
- * control step short of the last range's unrounded end, and the final
- * frame must still show the journey complete.
- */
-function appendTravelled(
-  primitives: PreviewPrimitive[],
-  plan: MotionPlan,
-  tMs: number,
-  tcpMm: Vec3,
-  segmentPixels: ReadonlyMap<number, SegmentPolyline>,
-  ptp: ReadonlySet<number>,
-): void {
-  for (const range of plan.ranges) {
-    if (ptp.has(range.segmentIndex)) continue;
-    const polyline = segmentPixels.get(range.segmentIndex);
-    if (polyline === undefined || polyline.px.length === 0) continue;
-    const completeAt = Math.min(range.endMs, plan.durationMs);
-    let count: number;
-    if (tMs >= completeAt - TIME_SLACK_MS) {
-      count = polyline.px.length;
-    } else if (tMs > range.startMs) {
-      count = nearestSample(polyline, tcpMm) + 1;
-    } else {
-      continue;
-    }
-    if (count < 2) continue;
-    primitives.push({
-      kind: "solid",
-      points: polyline.px.slice(0, count),
-      colorIndex: MOTION_PREVIEW_COLORS.travelled,
-      width: 2,
-    });
-  }
-}
-
-/** Appends the PTP TCP trace: every trace run up to `frameIndex`. */
 function appendTrace(
   primitives: PreviewPrimitive[],
   runs: readonly (readonly number[])[],
@@ -519,6 +369,35 @@ function appendTrace(
       width: 1,
     });
   }
+}
+
+/**
+ * Appends the travelled-part highlight: for every plan range, the
+ * drawn polyline up to the extent the scene measured for the frame's
+ * moment — the drawn sample count nearest the frame's forward-
+ * kinematics TCP (`PreviewSceneMoment.travelled`), which ends where
+ * the TCP marker sits. A count below 2 spans nothing drawable; a PTP
+ * Move's count is 0 (only arrival is guaranteed, ADR 0016 — the
+ * travelled reality is the TCP trace).
+ */
+function appendTravelled(
+  primitives: PreviewPrimitive[],
+  ranges: readonly PlanSegmentRange[],
+  counts: readonly number[],
+  segmentPixels: ReadonlyMap<number, readonly (readonly [number, number])[]>,
+): void {
+  ranges.forEach((range, index) => {
+    const count = counts[index] as number;
+    if (count < 2) return;
+    const px = segmentPixels.get(range.segmentIndex);
+    if (px === undefined || px.length === 0) return;
+    primitives.push({
+      kind: "solid",
+      points: px.slice(0, count),
+      colorIndex: MOTION_PREVIEW_COLORS.travelled,
+      width: 2,
+    });
+  });
 }
 
 /**
