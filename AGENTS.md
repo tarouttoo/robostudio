@@ -29,6 +29,11 @@ humans and coding agents edit both the product code and the pipeline code.
   review them. Direct one-shot edits in the working tree are the exception
   — agree it with the operator before starting. Every change request is
   assessed for this each time, not assumed.
+- The operator pushes every change to GitHub immediately and works from two
+  computers, so `origin/main` can move between (or during) sessions and any
+  handoff's picture of the remote may be stale. Always `git fetch` and rebase
+  onto `origin/main` before starting work; don't trust remembered commit
+  hashes — re-read the log.
 - Pipeline files (`.sandcastle/agent-workflows/`, `.github/workflows/`)
   are ours to change: the verbatim-port constraint was removed by ADR 0019,
   and the course / upstream sandcastle are references, not authorities.
