@@ -209,6 +209,22 @@ jobs:
           BRANCH: ${{ steps.branch.outputs.name }}
         run: git push --force origin "$BRANCH"
 
+      - name: Announce handoff to the merger
+        # v2: a Ticket with a parent Spec ships without a PR, so between
+        # this push and the merger's close the Ticket sits OPEN with no
+        # label — indistinguishable from an unstarted or dead one. Leave
+        # the trace on the Ticket itself (classic chain has the PR).
+        if: steps.shape.outputs.route == 'implement' && steps.shape.outputs.parent_number != '' && success()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh issue comment "$ISSUE_NUMBER" --body
+          "Branch \`${BRANCH}\` pushed (v2: no PR — the merger takes it).
+          Waiting at the wave barrier: the merger merges this branch into
+          the Spec's integration branch and closes this Ticket when its
+          whole wave is complete."
+
       - name: Open draft PR
         if: steps.shape.outputs.route == 'implement' && steps.shape.outputs.parent_number == '' && success()
         id: open_pr
