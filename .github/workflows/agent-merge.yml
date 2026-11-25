@@ -3,9 +3,10 @@ name: Agent Merge Spec
 # The merger (ADR 0019, course lesson 102 design two): waves of completed
 # Spec-Ticket branches get merged into the Spec's Integration Branch, the
 # Tickets get closed (their close events re-fire agent-convert — the next
-# wave's frontier), and when the last Ticket closes, ONE draft PR
-# Spec → main opens and is labelled `agent:review` — the existing review +
-# auto-merge chain takes it from there.
+# wave's frontier; the close goes out with AGENT_PAT — events fired by
+# GITHUB_TOKEN never start workflows), and when the last Ticket closes,
+# ONE draft PR Spec → main opens and is labelled `agent:review` — the
+# existing review + auto-merge chain takes it from there.
 #
 # Triggers: a push to any agent ticket branch (implement runs push without
 # a PR in the v2 flow — each push is a "maybe a wave completed" pulse), and
