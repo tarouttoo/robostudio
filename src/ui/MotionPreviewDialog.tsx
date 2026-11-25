@@ -1,7 +1,7 @@
 /**
  * The Motion Preview playback dialog (Spec user story 27): the operator
  * watches the last successful Generation's motion without leaving the
- * app. The dialog renders the outcome's Preview Scene (ADR 0018) — the
+ * app. The dialog renders the outcome's Preview Scene (ADR 0023) — the
  * same millimetre document the exported GIF renders — through the
  * Orbit Camera (`orbit-camera.ts`): pointer drag orbits (yaw/pitch),
  * the wheel dollies, «Вписать» and a double-click reset to the default

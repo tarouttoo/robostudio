@@ -15,7 +15,7 @@
  * outcome carries them: the «Графики» view shows exactly the documents
  * of the last successful Generation, as data — no view-side
  * re-derivation from plan + model. The Motion Preview's Preview Scene
- * rides on the outcome the same way (ADR 0018), carried out of the
+ * rides on the outcome the same way (ADR 0023), carried out of the
  * pipeline itself: the playback dialog renders the same scene document
  * the GIF exporter renders, so what it plays is what the GIF shows.
  * The pipeline, the chart renderer, and the preview scene builder are

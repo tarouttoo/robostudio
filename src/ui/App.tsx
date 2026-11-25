@@ -75,7 +75,7 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * the outcome carries, rendered at Generation time by the headless
  * renderer (ADR 0013, `ChartsView.tsx`). «Предпросмотр движения…»
  * opens the playback dialog (`MotionPreviewDialog.tsx`) over the same
- * outcome's Preview Scene (ADR 0018) — the scene document the exported
+ * outcome's Preview Scene (ADR 0023) — the scene document the exported
  * GIF also renders; the dialog explores it through its own Orbit
  * Camera. Regeneration replaces those charts and scene with the new
  * outcome's documents; a failed or blocked run carries neither and
@@ -96,7 +96,7 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [previewOpen, setPreviewOpen] = useState(false);
   /** The charts of the last successful generation, carried on its outcome (ADR 0013). */
   const charts = generation !== null && generation.kind === "ok" ? generation.charts : null;
-  /** The Preview Scene of the last successful generation, carried on its outcome (ADR 0018). */
+  /** The Preview Scene of the last successful generation, carried on its outcome (ADR 0023). */
   const previewScene = generation !== null && generation.kind === "ok" ? generation.previewScene : null;
   /** The Generation module's one export-policy answer: the export button's
    * disabled state, its stale notice, and the export guard all consume it. */
