@@ -12,8 +12,11 @@
  * Plan + Robot Model in, named output documents out (SVG chart files,
  * rendered headless — ADR 0013), so CI verifies every spec plot before
  * any UI exists and the UI shows the very documents CI verified. The
- * Motion Preview (`renderMotionPreviewGif`) completes the family: the
- * animated GIF bytes ride on the pipeline result next to the CSVs.
+ * Motion Preview completes the family: the Preview Scene
+ * (`buildPreviewScene`) assembles the millimetre-space scene document
+ * from Trajectory + Motion Plan + Robot Model, and
+ * `renderMotionPreviewGif` renders it as animated GIF bytes that ride
+ * on the pipeline result next to the CSVs.
  */
 
 export { PipelineError, type PipelineErrorTag, type PipelineStage } from "./errors";
@@ -29,3 +32,5 @@ export { toRobotCsv } from "./robot-csv";
 export { rvizAngles, toRvizCsv } from "./rviz-csv";
 export { renderMotionPreviewFrames, renderMotionPreviewGif, rasterizePreviewFrame, MOTION_PREVIEW_MAX_FRAMES, MOTION_PREVIEW_WIDTH, MOTION_PREVIEW_HEIGHT, MOTION_PREVIEW_PALETTE, MOTION_PREVIEW_COLORS } from "./motion-preview";
 export type { MotionPreviewInput, MotionPreviewFrame, MotionPreviewGif, PreviewPrimitive } from "./motion-preview";
+export { buildPreviewScene } from "./preview-scene";
+export type { PreviewScene, PreviewSceneBounds, PreviewSceneInput, PreviewSceneMoment, PreviewSceneSegment } from "./preview-scene";
