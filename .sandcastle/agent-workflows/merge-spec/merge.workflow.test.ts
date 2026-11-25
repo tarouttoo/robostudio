@@ -71,3 +71,31 @@ describe("agent-merge.yml", () => {
     expect(blocked?.run).toContain("agent:blocked");
   });
 });
+
+/**
+ * Contract test over the merger script's ticket closes (the source-level
+ * analogue of shared/push-permissions.test.ts): GitHub never fires
+ * workflows for events created by GITHUB_TOKEN, so a bare-`gh` close
+ * would silently wedge every ticket waiting on the closed one — the
+ * converter's only pulse for dependents is the `closed` event.
+ */
+const script = readFileSync(
+  new URL("./merge-spec.ts", import.meta.url),
+  "utf8",
+);
+const closeTickets = script.slice(
+  script.indexOf("const closeTickets"),
+  script.indexOf("try {", script.indexOf("const closeTickets")),
+);
+
+describe("closeTickets", () => {
+  it("closes tickets through AGENT_PAT so the closed event re-fires agent-convert", () => {
+    expect(closeTickets).toContain(
+      'ghWith(["issue", "close", String(ticket.number)], AGENT_PAT)',
+    );
+  });
+
+  it("never closes with the ambient GITHUB_TOKEN", () => {
+    expect(closeTickets).not.toContain('gh(["issue", "close"');
+  });
+});
