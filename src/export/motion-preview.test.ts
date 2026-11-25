@@ -56,7 +56,7 @@ const LINE_SCENE: Trajectory = trajectory(vec3(200, 0, 100), [
 /** A frozen-pose plan over LINE_SCENE: 6 rows, one range. */
 const LINE_PLAN = craftedPlan(
   [0, 1, 2, 3, 4, 5].map((i) => row(i * CONTROL_STEP_MS, [0, 0, 0])),
-  { segmentIndex: 0, feed: 100, startMs: 0, endMs: 120 },
+  { segmentIndex: 0, feed: 100, achievableFeed: 100, startMs: 0, endMs: 120 },
   100,
 );
 
@@ -81,7 +81,7 @@ describe("motion preview frame geometry", () => {
   it("samples at most 300 frames, evenly paced over the plan duration", () => {
     // 1000 rows = 20 s of motion: far past the frame budget.
     const rows = Array.from({ length: 1000 }, (_, i) => row(i * CONTROL_STEP_MS, [0, 0, 0]));
-    const longPlan = craftedPlan(rows, { segmentIndex: 0, feed: 100, startMs: 0, endMs: 20_000 }, 19_980);
+    const longPlan = craftedPlan(rows, { segmentIndex: 0, feed: 100, achievableFeed: 100, startMs: 0, endMs: 20_000 }, 19_980);
     const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan: longPlan, model });
     expect(frames.length).toBe(300);
     expect(frames[0]?.tMs).toBe(0);
@@ -165,7 +165,7 @@ describe("motion preview frame geometry", () => {
         row(80, qAt(250)),
         row(100, qAt(262.5)),
       ],
-      { segmentIndex: 0, feed: 100, startMs: 0, endMs: 120 },
+      { segmentIndex: 0, feed: 100, achievableFeed: 100, startMs: 0, endMs: 120 },
       100,
     );
     const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan, model });
@@ -237,10 +237,10 @@ describe("motion preview frame geometry", () => {
         row(80, [0, 0.3, 0], 1),
         row(100, [0, 0.4, 0], 1),
       ],
-      { segmentIndex: 0, feed: 100, startMs: 0, endMs: 40 },
+      { segmentIndex: 0, feed: 100, achievableFeed: 100, startMs: 0, endMs: 40 },
       100,
     );
-    const ptpRange2: PlanSegmentRange = { segmentIndex: 1, feed: 100, startMs: 40, endMs: 120 };
+    const ptpRange2: PlanSegmentRange = { segmentIndex: 1, feed: 100, achievableFeed: 100, startMs: 40, endMs: 120 };
     const plan: MotionPlan = { ...ptpPlan, ranges: [ptpPlan.ranges[0] as PlanSegmentRange, ptpRange2] };
     const frames = renderMotionPreviewFrames({ trajectory: ptpScene, plan, model });
 
@@ -397,7 +397,7 @@ describe("motion preview GIF", () => {
 
   it("renders a long plan: the GIF holds exactly the frame budget's 300 frames", () => {
     const rows = Array.from({ length: 1000 }, (_, i) => row(i * CONTROL_STEP_MS, [0, 0, 0]));
-    const longPlan = craftedPlan(rows, { segmentIndex: 0, feed: 100, startMs: 0, endMs: 20_000 }, 19_980);
+    const longPlan = craftedPlan(rows, { segmentIndex: 0, feed: 100, achievableFeed: 100, startMs: 0, endMs: 20_000 }, 19_980);
     const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: longPlan, model });
     expect(gif.frameCount).toBe(300);
     const decoded = decodeGifFrames(gif.bytes);

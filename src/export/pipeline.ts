@@ -285,11 +285,32 @@ function runMotionPlanStage(
     throw error;
   }
   verifyMotionPlan(plan, input.model, path.totalLengthMm);
+  // Feeds the dynamic limits cannot deliver are a legitimate operator
+  // request the time scaling silently slows down; the log names every
+  // such Segment so «changing the Feed did nothing» stays explainable
+  // (issue #60). The grid slack absorbs the duration's rounding to the
+  // 20 ms control step, so only real shortfalls are named.
+  const capped = plan.ranges.filter(
+    (range) =>
+      range.achievableFeed <
+      range.feed * (1 - CONTROL_STEP_MS / (range.endMs - range.startMs)) - 1e-9,
+  );
+  const capNote =
+    capped.length === 0
+      ? ""
+      : "; " +
+        capped
+          .map(
+            (range) =>
+              `segment ${range.segmentIndex} runs at ≈${Math.round(range.achievableFeed * 60)} mm/min, ` +
+              `below its ${Math.round(range.feed * 60)} mm/min Feed (time scaling)`,
+          )
+          .join(", ");
   return {
     plan,
     outcome: {
       stage: "motion-plan",
-      detail: `motion plan: ${plan.rows.length} rows over ${plan.durationMs} ms across ${plan.ranges.length} planned segment(s)`,
+      detail: `motion plan: ${plan.rows.length} rows over ${plan.durationMs} ms across ${plan.ranges.length} planned segment(s)${capNote}`,
     },
   };
 }

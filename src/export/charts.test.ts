@@ -85,7 +85,7 @@ function row(tMs: number, q: readonly number[], qd: readonly number[] = [0, 0, 0
 
 /** A single range covering the whole plan (one planned Segment). */
 function oneRange(feed: number, startMs: number, endMs: number): readonly PlanSegmentRange[] {
-  return [{ segmentIndex: 0, feed, startMs, endMs }];
+  return [{ segmentIndex: 0, feed, achievableFeed: feed, startMs, endMs }];
 }
 
 /** A plan whose identity-model pen moves along +X at exactly 20 mm/s. */

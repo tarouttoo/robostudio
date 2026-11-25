@@ -13,7 +13,7 @@ function planOf(rows: readonly MotionRow[]): MotionPlan {
   const durationMs = rows.at(-1)?.tMs ?? 0;
   return {
     rows,
-    ranges: [{ segmentIndex: 0, feed: 20, startMs: 0, endMs: durationMs }],
+    ranges: [{ segmentIndex: 0, feed: 20, achievableFeed: 20, startMs: 0, endMs: durationMs }],
     durationMs,
   };
 }

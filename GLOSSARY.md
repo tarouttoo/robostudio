@@ -49,7 +49,10 @@ here.
   convention), mm/s internally. Does not affect exported joint angles.
   Each Segment is drawn with the Feed the «Подача новых участков» field
   holds at that moment (the CNC modal F-word); «Применить ко всем
-  участкам» re-applies that field's value to every drawn Segment.
+  участкам» re-applies that field's value to every drawn Segment. A
+  Segment may traverse slower than its Feed — the Robot Model's
+  dynamic limits or the one-control-step floor stretch its duration —
+  and the generation log names such Segments.
 - **Home Point (Исходная точка)** — the 3D point where the drawn Trajectory
   starts; the pen position before the first Segment.
 - **Robot Model (Модель робота)** — a named description of a manipulator

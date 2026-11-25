@@ -105,6 +105,14 @@ export interface PlanSegmentRange {
   readonly segmentIndex: number;
   /** Feed the traverse time of this range follows, mm/s. */
   readonly feed: Feed;
+  /**
+   * The mean tangential speed the Segment actually achieves, mm/s: the
+   * Feed, or less when the time scaling (the Robot Model's dynamic
+   * limits, or the one-control-step floor on a tiny Segment) stretched
+   * the traverse past its Feed-nominal duration. Surfaces in the
+   * generation log when it falls short of the Feed.
+   */
+  readonly achievableFeed: number;
   /** Range start in milliseconds (inclusive). */
   readonly startMs: number;
   /** Range end in milliseconds (exclusive; profile end of the last). */
@@ -205,6 +213,9 @@ export function createSplinePlanner(model: RobotModel): Planner {
     const ranges: PlanSegmentRange[] = scaled.map(({ seg, tStartMs: start, durationMs }) => ({
       segmentIndex: seg.segmentIndex,
       feed: seg.feed,
+      // Total pen travel over total time: the honest mean tangential
+      // speed, capped at the Feed — a plan never runs faster than it.
+      achievableFeed: Math.min(seg.feed, ((seg.sEnd - seg.sStart) / durationMs) * 1000),
       startMs: start,
       endMs: start + durationMs,
     }));

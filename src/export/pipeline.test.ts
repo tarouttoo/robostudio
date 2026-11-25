@@ -111,6 +111,26 @@ describe("pipeline: stage chain", () => {
     expect(result.robotCsv.length).toBeGreaterThan(0);
   });
 
+  it("names Feeds the time scaling caps below the requested one in the motion-plan stage detail", () => {
+    const planDetail = (feed: number): string => {
+      const result = runPipeline({
+        trajectory: trajectory(vec3(240, 0, 260), [
+          line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed }),
+        ]),
+        model,
+        planner: createSplinePlanner(model),
+      });
+      return result.stages.find((s) => s.stage === "motion-plan")!.detail;
+    };
+    // A reachable Feed is reported without a cap note.
+    expect(planDetail(10)).not.toMatch(/below its/);
+    // 24000 mm/min on a 40 mm line is far past the dynamic limits:
+    // the log names the Segment and its actual traverse speed.
+    expect(planDetail(400)).toMatch(
+      /segment 0 runs at ≈\d+ mm\/min, below its 24000 mm\/min Feed \(time scaling\)/,
+    );
+  });
+
   it("carries the Motion Preview GIF bytes next to the CSVs", () => {
     const result = runPipeline({ trajectory: LINE_AND_ARC, model, planner: createSplinePlanner(model) });
 
@@ -344,7 +364,7 @@ describe("pipeline: named stage failures stop the chain", () => {
     const offGridPlanner: Planner = {
       plan: () => ({
         rows: [planRow(0, [0, 0, 0]), planRow(30, [0.1, 0, 0])],
-        ranges: [{ segmentIndex: 0, feed: 20, startMs: 0, endMs: 30 }],
+        ranges: [{ segmentIndex: 0, feed: 20, achievableFeed: 20, startMs: 0, endMs: 30 }],
         durationMs: 30,
       }),
     };

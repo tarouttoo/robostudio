@@ -247,6 +247,24 @@ describe("planner seam: segment boundaries", () => {
     }
   });
 
+  it("carries the achievable Feed per range: the Feed itself when gentle, less when the dynamic limits cap it", () => {
+    const trajAt = (feed: Feed): Trajectory =>
+      trajectory(vec3(240, 0, 260), [
+        line({ start: vec3(240, 0, 260), end: vec3(240, 100, 260), feed }),
+      ]);
+
+    // A Feed inside the dynamic limits is achieved as asked.
+    const gentle = planFromTrajectory(planner, model, trajAt(20));
+    expect(gentle.ranges[0]?.achievableFeed).toBeCloseTo(20, 6);
+
+    // 400 mm/s on a 100 mm line is far past the MiKo-mini's limits:
+    // the time scaling stretches the traverse, capping the mean speed.
+    const capped = planFromTrajectory(planner, model, trajAt(400));
+    const range = capped.ranges[0]!;
+    expect(range.achievableFeed).toBeGreaterThan(0);
+    expect(range.achievableFeed).toBeLessThan(range.feed);
+  });
+
   it("plans a Point Segment transit with its own Feed", () => {
     const traj = trajectory(vec3(240, 0, 260), [
       line({ start: vec3(240, 0, 260), end: vec3(240, 40, 260), feed: 20 }),
