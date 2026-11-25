@@ -25,7 +25,9 @@ import {
  * Integration Branch and settles conflicts there; this script owns every
  * GitHub write and every push. Closing Tickets is deterministic here, not
  * agent work (delta №2), and their close events re-fire the converter —
- * the next wave's frontier. When no Tickets remain open (delta №4), the
+ * the next wave's frontier (the close rides AGENT_PAT: GitHub never fires
+ * workflows for events created by GITHUB_TOKEN). When no Tickets remain
+ * open (delta №4), the
  * script opens ONE draft PR Spec → main from the Integration Branch and
  * labels it `agent:review`, so the existing review + auto-merge chain
  * (ADR 0011 + 0014) takes over.
@@ -151,7 +153,11 @@ const closeTickets = (tickets: readonly { number: number; branch: string }[]): v
       "--body",
       `Merged into \`${integration}\` by the merger run ([run](${runUrl})). Closing — the converter picks up the next wave.`,
     ]);
-    gh(["issue", "close", String(ticket.number)]);
+    // The close rides AGENT_PAT: the `closed` event must re-fire
+    // agent-convert (the waiting tickets' frontier), and GitHub never
+    // fires workflows for events created by GITHUB_TOKEN. The comment
+    // above fires nothing and stays on the ambient token.
+    ghWith(["issue", "close", String(ticket.number)], AGENT_PAT);
   }
 };
 
