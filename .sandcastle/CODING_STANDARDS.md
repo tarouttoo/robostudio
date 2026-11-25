@@ -31,6 +31,11 @@ production caller passes the argument. Tests cover both modes.
 When the compiler cannot prove an invariant the code "knows", restructure
 so it can — extract a helper returning a pair, let null checks compose —
 instead of writing `?? 0`-style defaults that bury a broken assumption.
+At untyped boundaries (JSON emitted by an agent, external API responses)
+a required key's absence is a rejection, not a default: `record.key ??
+fallback` there is the exact `?? 0`-shape this rule bans (retro
+2026-11-25 — a drifted `blockedBy` key silently dropped a Spec's
+blocking edges, Spec #59).
 
 ## Small honest duplication over coupling
 
