@@ -24,6 +24,14 @@ describe("asTicketPlan", () => {
     expect(plan[2]!.blockedBy).toEqual([0, 1]);
   });
 
+  it("rejects a ticket whose blockedBy key is missing — silent edge loss", () => {
+    expect(() =>
+      asTicketPlan({
+        tickets: [ticket("A"), { title: "B", body: "B acceptance criteria" }],
+      }),
+    ).toThrow(/blockedBy is required/);
+  });
+
   it("rejects an empty plan — a marked Spec must decompose", () => {
     expect(() => asTicketPlan({ tickets: [] })).toThrow(/at least one Ticket/);
     expect(() => asTicketPlan({})).toThrow(/at least one Ticket/);

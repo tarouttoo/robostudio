@@ -29,7 +29,16 @@ const asIndex = (value: unknown, label: string, size: number): number => {
 
 const asPlanTicket = (value: unknown, label: string, size: number): PlanTicket => {
   const record = asRecord(value, label);
-  const blockedBy = asArray(record.blockedBy ?? [], `${label}.blockedBy`).map(
+  // The key is required even when empty: defaulting a missing key to []
+  // silently drops the Spec's blocking edges (an extraction key drift like
+  // `blocked_by` would pass validation and decompose into one all-parallel
+  // wave). The rejection feeds back to the agent, which re-emits the tag.
+  if (!("blockedBy" in record)) {
+    throw new Error(
+      `${label}.blockedBy is required — echo the key explicitly, [] when the ticket has no blockers`,
+    );
+  }
+  const blockedBy = asArray(record.blockedBy, `${label}.blockedBy`).map(
     (entry, index) => asIndex(entry, `${label}.blockedBy[${index}]`, size),
   );
   return {
