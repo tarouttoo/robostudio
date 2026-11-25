@@ -17,7 +17,10 @@
  * never stored: editing the Home Point or undoing a Segment re-derives
  * where the next Move or Arc begins. Committed Moves stay editable:
  * the reducer rewrites one Move's Motion Type or Feed, the way the
- * drawing itself is never touched by an edit.
+ * drawing itself is never touched by an edit. The toolbar Feed field is
+ * modal (the CNC F-word): it sets the Feed of Segments drawn after the
+ * change, and the explicit apply-to-all action rewrites every drawn
+ * Segment's Feed at once.
  *
  * Unit conventions follow GLOSSARY.md: the UI works in mm/min (CNC
  * convention), the internal unit is mm/s; conversion happens here, in
@@ -141,6 +144,7 @@ export type EditorAction =
   | { readonly type: "numericEntry"; readonly u: number; readonly v: number }
   | { readonly type: "setSegmentFeedMmMin"; readonly index: number; readonly raw: string }
   | { readonly type: "setSegmentMotionType"; readonly index: number; readonly motionType: MotionType }
+  | { readonly type: "applyFeedToAllSegments" }
   | { readonly type: "cancelDraft" }
   | { readonly type: "undo" }
   | { readonly type: "clear" }
@@ -339,6 +343,15 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         segments: state.segments.map((s, i) =>
           i === action.index && s.kind === "point" ? { ...s, motionType: action.motionType } : s,
         ),
+      };
+    }
+    case "applyFeedToAllSegments": {
+      // The explicit global apply rewrites every drawn Segment's Feed —
+      // individually edited ones included: the button's scope is
+      // explicit (issue #60), and the geometry is untouched.
+      return {
+        ...state,
+        segments: state.segments.map((s) => ({ ...s, feed: mmMinToMmS(state.feedMmMin) })),
       };
     }
     case "cancelDraft":

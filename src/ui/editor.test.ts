@@ -636,6 +636,41 @@ describe("editor state", () => {
     expect(seg.kind === "point" && seg.feed).toBe(10);
   });
 
+  it("draws at the old feed after drawing: the toolbar field is modal, it does not rewrite drawn Segments", () => {
+    // Issue #60's report: the field changed after drawing must not be
+    // mistaken for a live speed control — only new Segments pick it up.
+    const drawn = placePoint(initialEditorState, 10, 0);
+    const retuned = editorReducer(drawn, { type: "setFeedMmMin", raw: "600" });
+    const seg = retuned.segments[0]!;
+    expect(retuned.feedMmMin).toBe(600);
+    expect(seg.kind === "point" && seg.feed).toBe(mmMinToMmS(DEFAULT_FEED_MM_MIN));
+  });
+
+  it("apply-to-all rewrites every drawn Segment's Feed — individually edited ones included — and keeps the geometry", () => {
+    let state: EditorState = { ...placeHome(initialEditorState, 0, 0), tool: "point" };
+    state = placePoint(state, 10, 0);
+    state = placePoint(state, 10, 10);
+    // One Segment is tuned individually to 600 mm/min = 10 mm/s.
+    const tuned = editorReducer(state, { type: "setSegmentFeedMmMin", index: 1, raw: "600" });
+    const retuned = editorReducer(tuned, { type: "setFeedMmMin", raw: "1800" });
+    const applied = editorReducer(retuned, { type: "applyFeedToAllSegments" });
+    expect(applied.feedMmMin).toBe(1800);
+    expect(applied.segments).toHaveLength(2);
+    for (const seg of applied.segments) {
+      expect(seg.feed).toBe(30); // 1800 mm/min = 30 mm/s
+    }
+    // The geometry is untouched: same targets in draw order.
+    const [first, second] = applied.segments;
+    expect(first?.kind === "point" && first.target).toEqual(vec3(10, 0, 0));
+    expect(second?.kind === "point" && second.target).toEqual(vec3(10, 10, 0));
+  });
+
+  it("apply-to-all on an empty drawing is a no-op", () => {
+    const applied = editorReducer(initialEditorState, { type: "applyFeedToAllSegments" });
+    expect(applied.segments).toHaveLength(0);
+    expect(applied.feedMmMin).toBe(initialEditorState.feedMmMin);
+  });
+
   it("rejects invalid feed inputs: empty, NaN, zero, negative", () => {
     for (const raw of ["", "  ", "abc", "0", "-5", "NaN"]) {
       const state = editorReducer(initialEditorState, { type: "setFeedMmMin", raw });

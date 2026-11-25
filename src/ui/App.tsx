@@ -342,8 +342,11 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 )}
               </div>
             )}
-            <label style={rowStyle}>
-              Подача, мм/мин{" "}
+            <label
+              style={rowStyle}
+              title="Поле задаёт подачу участков, нарисованных после его изменения. Чтобы переназначить подачу уже нарисованной траектории, нажмите «Применить ко всем участкам»."
+            >
+              Подача новых участков, мм/мин{" "}
               <NumberField
                 value={state.feedMmMin}
                 onCommit={(raw) => dispatch({ type: "setFeedMmMin", raw })}
@@ -351,6 +354,14 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
                 min={1}
               />
             </label>
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "applyFeedToAllSegments" })}
+              disabled={state.segments.length === 0}
+              title="Переписывает подачу всех нарисованных участков значением поля — в том числе тех, у которых подачу правили по отдельности."
+            >
+              Применить ко всем участкам
+            </button>
           </fieldset>
 
           <NumericEntryFieldset

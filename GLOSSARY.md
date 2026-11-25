@@ -47,6 +47,9 @@ here.
   G17/G18/G19 conventions.
 - **Feed (Подача)** — Segment traverse speed. mm/min in the UI (CNC
   convention), mm/s internally. Does not affect exported joint angles.
+  Each Segment is drawn with the Feed the «Подача новых участков» field
+  holds at that moment (the CNC modal F-word); «Применить ко всем
+  участкам» re-applies that field's value to every drawn Segment.
 - **Home Point (Исходная точка)** — the 3D point where the drawn Trajectory
   starts; the pen position before the first Segment.
 - **Robot Model (Модель робота)** — a named description of a manipulator
@@ -118,6 +121,10 @@ see `docs/agents/`):
 - **Runner (Раннер)** — the disposable machine a Run executes on; any state
   it creates ends up in the Git Host (commits, branches, PRs) or the
   Ticket Tracker (comments, labels).
+- **One-shot edit (Оншот-правка)** — a direct working-tree edit agreed
+  with the operator, bypassing the Spec → Ticket pipeline; its ticket
+  carries the `oneshot` label and is the trace of the change, not a
+  work order.
 - **Orchestrator (Оркестратор)** — keeps track of Runners, triggers them on
   events and schedules, and handles Run errors.
 - **Ticket Tracker (Трекер задач)** — where Tasks are requested and
