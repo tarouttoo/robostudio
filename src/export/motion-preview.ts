@@ -194,12 +194,12 @@ export function renderMotionPreviewGif(input: MotionPreviewInput): MotionPreview
  * Rasterizes one frame's primitives onto the palette: background
  * first, then primitives in draw order (later draws over earlier).
  * Pure integer pixel math — no anti-aliasing, no floats in the pixel
- * buffer — so the bytes are exactly reproducible. This is the raster
- * step both current consumers share: the GIF encoder encodes these
- * pixels, and the playback dialog paints these same palette indices
- * (converted to RGB through {@link MOTION_PREVIEW_PALETTE}), so what
- * the dialog shows is exactly what the exported GIF shows — two views
- * of the one Preview Scene document.
+ * buffer — so the bytes are exactly reproducible. This is the GIF
+ * renderer's internal raster step: the encoder encodes these pixels,
+ * and the renderer's tests pin them by decoding the GIF back. (The
+ * playback dialog once painted these same palette indices — the
+ * exact-pixels contract; it now renders the Preview Scene through its
+ * own Orbit Camera instead, so the raster stays internal.)
  */
 export function rasterizePreviewFrame(frame: MotionPreviewFrame): Uint8Array {
   const pixels = new Uint8Array(MOTION_PREVIEW_WIDTH * MOTION_PREVIEW_HEIGHT);

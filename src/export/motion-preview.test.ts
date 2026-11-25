@@ -404,10 +404,9 @@ describe("motion preview GIF", () => {
     expect(decoded.frames.length).toBe(300);
   });
 
-  it("rasterizes the frames the dialog consumes exactly as the GIF encodes them", () => {
-    // The playback dialog draws `rasterizePreviewFrame`'s pixels (the
-    // shared renderer's raster step); the GIF encodes the same frames
-    // through the same step — decoding the GIF back must yield the
+  it("rasterizes the frames exactly as the GIF encodes them", () => {
+    // The GIF encodes `rasterizePreviewFrame`'s pixels (the renderer's
+    // internal raster step); decoding the GIF back must yield the
     // identical palette-index pixels, frame for frame.
     const frames = renderMotionPreviewFrames({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });
     const gif = renderMotionPreviewGif({ trajectory: LINE_SCENE, plan: LINE_PLAN, model });

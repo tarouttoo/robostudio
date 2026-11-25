@@ -21,11 +21,12 @@
  *    in the chain so collision checking can be added later without
  *    reshaping the pipeline.
  * 5. `export` — the Robot CSV and RViz CSV exporters render the plan,
- *    the Motion Preview GIF is rendered from the same plan (the
- *    animated isometric preview, `robot_motion.gif`), and the exported
- *    arrays are parsed back and checked against the plan (row count,
- *    header, time column, values within formatting precision) before
- *    the bytes leave the pipeline.
+ *    the Preview Scene is assembled once from the Trajectory, the plan,
+ *    and the Robot Model, and the Motion Preview GIF is rendered from
+ *    that one document (the animated isometric preview,
+ *    `robot_motion.gif`), and the exported arrays are parsed back and
+ *    checked against the plan (row count, header, time column, values
+ *    within formatting precision) before the bytes leave the pipeline.
  *
  * The stages are also reported as outcomes on success so the UI can
  * show a readable generation log (the stage details are English; the
@@ -40,6 +41,7 @@ import { MotionError } from "../motion/errors";
 import { CONTROL_STEP_MS, type MotionPlan, type Planner } from "../motion/planner";
 import { PipelineError, type PipelineStage } from "./errors";
 import { renderMotionPreviewGif } from "./motion-preview";
+import { buildPreviewScene, type PreviewScene } from "./preview-scene";
 import { toRobotCsv } from "./robot-csv";
 import { rvizAngles, toRvizCsv } from "./rviz-csv";
 
@@ -113,6 +115,15 @@ export interface PipelineResult {
    * PTP TCP trace), written as `robot_motion.gif` next to the CSVs.
    */
   readonly motionGif: Uint8Array;
+  /**
+   * The Preview Scene — the millimetre-space document assembled once,
+   * at Generation time, from the Trajectory, the plan, and the Robot
+   * Model: the Motion Preview GIF above renders it through the fixed
+   * isometric camera, and the UI's playback dialog renders the same
+   * document through its own Orbit Camera. One scene, two cameras —
+   * the two renderings cannot drift apart.
+   */
+  readonly previewScene: PreviewScene;
   /** Every stage's outcome, in run order; all succeeded. */
   readonly stages: readonly PipelineStageOutcome[];
 }
@@ -123,7 +134,7 @@ export interface PipelineResult {
  * the reserved collision no-op, and renders both CSV exports — each
  * stage validating its own output. Throws a `PipelineError` naming the
  * first stage that fails; on success returns the plan, the exported
- * bytes, and every stage's outcome.
+ * bytes, the Preview Scene, and every stage's outcome.
  */
 export function runPipeline(input: PipelineInput): PipelineResult {
   const { path, outcome: discretizationOutcome } = runDiscretizationStage(input.trajectory);
@@ -133,14 +144,18 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
   const robotCsv = toRobotCsv(plan);
   const rvizCsv = toRvizCsv(plan);
-  const motionGif = renderMotionPreviewGif({ trajectory: input.trajectory, plan, model: input.model });
+  // One Preview Scene per Generation: the GIF renders this document,
+  // and the outcome carries it for the playback dialog — the dialog and
+  // the GIF cannot drift apart (no second build anywhere downstream).
+  const previewScene = buildPreviewScene({ trajectory: input.trajectory, plan, model: input.model });
+  const motionGif = renderMotionPreviewGif({ trajectory: input.trajectory, plan, model: input.model, scene: previewScene });
   stages.push({
     stage: "export",
     detail: `Robot CSV: ${plan.rows.length} rows, ${robotCsv.length} characters; RViz CSV: ${rvizCsv.length} characters; Motion Preview GIF: ${motionGif.frameCount} frames, ${motionGif.bytes.length} bytes (robot_motion.gif)`,
   });
   verifyExportedArrays(robotCsv, rvizCsv, plan);
 
-  return { plan, robotCsv, rvizCsv, motionGif: motionGif.bytes, stages };
+  return { plan, robotCsv, rvizCsv, motionGif: motionGif.bytes, previewScene, stages };
 }
 
 /**

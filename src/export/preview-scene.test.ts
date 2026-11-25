@@ -247,6 +247,15 @@ describe("preview scene travelled extents", () => {
     // line's end: the nearest drawn sample is the last one.
     expect(momentAt(scene, 1).travelled[0]).toBe(201);
   });
+
+  it("names the Segment behind each travelled slot, so the scene alone maps counts to polylines", () => {
+    // PTP_SCENE draws a Line and a PTP Move — two plan ranges, two
+    // slots, their Segment indexes in traversal order. A scene-only
+    // consumer (the playback dialog) maps a travelled count to its
+    // Segment polyline through exactly this list.
+    const scene = buildPreviewScene({ trajectory: PTP_SCENE, plan: PTP_PLAN, model });
+    expect(scene.travelledSegments).toEqual([0, 1]);
+  });
 });
 
 describe("preview scene PTP trace runs", () => {
