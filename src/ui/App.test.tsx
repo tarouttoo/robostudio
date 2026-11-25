@@ -150,7 +150,7 @@ describe("app shell", () => {
   it("offers the Motion Preview dialog behind Предпросмотр движения…, locked until a generation", () => {
     const html = renderToString(<App />).replace(/<!-- -->/g, "");
     expect(html).toContain("Предпросмотр движения…");
-    // Like the export, the preview needs a successful generation's frames.
+    // Like the export, the preview needs a successful generation's scene.
     expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Предпросмотр движения/);
   });
 

@@ -14,9 +14,11 @@
  * any UI exists and the UI shows the very documents CI verified. The
  * Motion Preview completes the family: the Preview Scene
  * (`buildPreviewScene`) assembles the millimetre-space scene document
- * from Trajectory + Motion Plan + Robot Model, and
- * `renderMotionPreviewGif` renders it as animated GIF bytes that ride
- * on the pipeline result next to the CSVs.
+ * from Trajectory + Motion Plan + Robot Model; the pipeline result
+ * carries that one document, `renderMotionPreviewGif` renders it as
+ * animated GIF bytes next to the CSVs, and the UI's playback dialog
+ * renders the same scene through its own Orbit Camera — two cameras
+ * over one document, never two diverging renderings.
  */
 
 export { PipelineError, type PipelineErrorTag, type PipelineStage } from "./errors";
@@ -30,7 +32,7 @@ export { CHART_IDS, renderCharts } from "./charts";
 export type { ChartId, RenderedChart } from "./charts";
 export { toRobotCsv } from "./robot-csv";
 export { rvizAngles, toRvizCsv } from "./rviz-csv";
-export { renderMotionPreviewFrames, renderMotionPreviewGif, rasterizePreviewFrame, MOTION_PREVIEW_MAX_FRAMES, MOTION_PREVIEW_WIDTH, MOTION_PREVIEW_HEIGHT, MOTION_PREVIEW_PALETTE, MOTION_PREVIEW_COLORS } from "./motion-preview";
-export type { MotionPreviewInput, MotionPreviewFrame, MotionPreviewGif, PreviewPrimitive } from "./motion-preview";
+export { renderMotionPreviewGif, MOTION_PREVIEW_MAX_FRAMES } from "./motion-preview";
+export type { MotionPreviewInput, MotionPreviewFrame, MotionPreviewGif } from "./motion-preview";
 export { buildPreviewScene } from "./preview-scene";
 export type { PreviewScene, PreviewSceneBounds, PreviewSceneInput, PreviewSceneMoment, PreviewSceneSegment } from "./preview-scene";

@@ -354,9 +354,12 @@ const DASH_ON_PX = 4;
  * randomness, no wall-clock input — so identical input yields byte-
  * identical output (ADR 0018's raster statement, relaxed from pure
  * integer pixels to deterministic float math with pinned bytes).
- * The raster step is what the GIF encoder encodes; the playback
- * dialog paints these same palette indices until its own camera
- * ticket, so the dialog keeps showing exactly what the GIF shows.
+ * This is the GIF renderer's internal raster step: the encoder
+ * encodes these pixels, and the renderer's tests pin them by decoding
+ * the GIF back. (The playback dialog once painted these same palette
+ * indices — the exact-pixels contract; it now renders the Preview
+ * Scene through its own Orbit Camera instead, so the raster stays
+ * internal.)
  */
 export function rasterizePreviewFrame(frame: MotionPreviewFrame): Uint8Array {
   const s = SUPERSAMPLE;

@@ -91,7 +91,8 @@ export interface PreviewSceneMoment {
    * many of that range's Segment polyline samples are travelled at this
    * moment (0 under a PTP Move — only arrival is guaranteed, ADR 0016).
    * Raw counts: a count below 2 spans nothing drawable; the renderer
-   * decides what to stroke.
+   * decides what to stroke. The slot's Segment is
+   * `PreviewScene.travelledSegments[slot]`.
    */
   readonly travelled: readonly number[];
 }
@@ -116,6 +117,16 @@ export interface PreviewScene {
   readonly moments: readonly PreviewSceneMoment[];
   /** Runs of consecutive moment indices traversing one PTP Move. */
   readonly traceRuns: readonly (readonly number[])[];
+  /**
+   * The Segment index behind each slot of the moments' `travelled`
+   * arrays (which are aligned with the plan's ranges, in the same
+   * order): the mapping that lets a scene-only consumer stroke a
+   * travelled count against its Segment's polyline — the plan's ranges
+   * are not part of the document, and a Segment can carry a polyline
+   * without a range (a zero-length Move samples once and spans no plan
+   * time). The GIF renderer reads the same mapping off `plan.ranges`.
+   */
+  readonly travelledSegments: readonly number[];
   /** The Home Point (Trajectory home), in millimetres. */
   readonly homeMm: Vec3;
   /** The scene's mm bounding box: trajectory + chains + home. */
@@ -173,6 +184,7 @@ export function buildPreviewScene(input: PreviewSceneInput): PreviewScene {
     segments,
     moments,
     traceRuns,
+    travelledSegments: input.plan.ranges.map((range) => range.segmentIndex),
     homeMm,
     boundsMm: sceneBounds(segments, chains, homeMm),
   };
