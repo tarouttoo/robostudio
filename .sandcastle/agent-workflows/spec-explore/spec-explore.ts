@@ -55,8 +55,12 @@ try {
     ),
   ].join("\n");
 
+  // gh() returns raw JSON stdout; parseNativeIssues eats parsed data.
   const tickets = parseNativeIssues(
-    gh(["api", `repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues`]),
+    JSON.parse(gh([
+      "api",
+      `repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues`,
+    ])),
   );
   const ticketSections: string[] = [];
   for (const ticket of tickets) {

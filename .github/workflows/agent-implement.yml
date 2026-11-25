@@ -30,10 +30,11 @@ jobs:
 
     steps:
       # Route by issue shape (ADR 0019, delta №1): a Spec with Tickets goes
-      # to the exploration-notes runner; a Spec marked `spec` without
-      # Tickets goes to the to-tickets runner (AFK decomposition); an issue
-      # without sub-issues implements (its parent Spec, if any, is pulled
-      # in as context).
+      # to the exploration-notes runner; a ticketless Spec goes to the
+      # to-tickets runner (AFK decomposition) when marked `spec` or titled
+      # `Spec: …` (the marker is canonical, the title the safety net); an
+      # issue without sub-issues implements (its parent Spec, if any, is
+      # pulled in as context).
       - name: Detect issue shape
         id: shape
         run: |
@@ -46,9 +47,10 @@ jobs:
             -f owner="$owner" -f repo="$repo" -F num="$ISSUE_NUMBER" \
             --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
           has_spec_label=$(gh issue view "$ISSUE_NUMBER" --json labels --jq 'any(.labels[]; .name == "spec")')
+          title_is_spec=$(printf '%s' "$ISSUE_TITLE" | grep -qiE '^spec:' && echo true || echo false)
           if [ "$sub_count" != "0" ]; then
             route="spec-explore"
-          elif [ "$has_spec_label" = "true" ]; then
+          elif [ "$has_spec_label" = "true" ] || [ "$title_is_spec" = "true" ]; then
             route="to-tickets"
           else
             route="implement"

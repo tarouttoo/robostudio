@@ -47,6 +47,10 @@ const ghWith = (args: string[], token: string): string =>
     env: { ...process.env, GH_TOKEN: token },
   });
 
+// gh()/ghWith() return raw JSON stdout; parseNativeIssues eats parsed data.
+const ghJsonWith = (args: string[], token: string): unknown =>
+  JSON.parse(ghWith(args, token));
+
 const issueNumber = Number(ISSUE_NUMBER);
 if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
   fail(`Invalid issue number: ${ISSUE_NUMBER}`);
@@ -57,7 +61,10 @@ try {
   // (a parallel event). Sub-issue count > 0 means the exploration-notes
   // route owns this Spec now.
   const subCount = parseNativeIssues(
-    gh(["api", `repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues`]),
+    JSON.parse(gh([
+      "api",
+      `repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues`,
+    ])),
   ).length;
   if (subCount > 0) {
     appendSummary(
@@ -176,7 +183,7 @@ try {
   // Verify the graph landed before handing control to the cascade — a
   // missing parent edge would silently demote the Ticket to standalone.
   const subIssues = parseNativeIssues(
-    ghWith(
+    ghJsonWith(
       ["api", "--paginate", `repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues`],
       AGENT_PAT,
     ),
@@ -191,7 +198,7 @@ try {
   for (let index = 0; index < plan.length; index += 1) {
     const expected = plan[index]!.blockedBy.map((blocker) => numbers[blocker]!);
     const actual = parseNativeIssues(
-      ghWith(
+      ghJsonWith(
         [
           "api",
           "--paginate",

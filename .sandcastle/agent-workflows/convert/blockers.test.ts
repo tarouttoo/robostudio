@@ -96,6 +96,12 @@ describe("parseNativeIssues", () => {
     ]);
   });
 
+  it("refuses a raw stdout string — callers must JSON.parse first", () => {
+    expect(() => parseNativeIssues("[]")).toThrow(
+      "dependencies response must be an array",
+    );
+  });
+
   it("defaults a missing state to open", () => {
     expect(parseNativeIssues([{ number: 5 }])).toEqual([
       { number: 5, state: "open" },

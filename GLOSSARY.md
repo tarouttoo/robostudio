@@ -117,6 +117,12 @@ see `docs/agents/`):
   decomposed into child Tickets with blocking edges.
 - **Ticket (Тикет)** — a child issue of a Spec, small enough for one
   implement Run; carries blocking edges to other Tickets.
+- **Spec marker (метка `spec`)** — the mark on a Spec that has no Tickets
+  yet; what distinguishes a ticketless Spec from a standalone Ticket in
+  the tracker. Redundant once Tickets exist.
+- **Shape (Форма)** — the routing class of an issue in the implement
+  preflight: standalone Ticket, ticketless Spec, Spec with Tickets. The
+  shape decides the route; the marker only marks it (ADR `0019`).
 - **Task (Задача)** — a unit of factory work performed as a Run: explore,
   implement, review, rebase, prototype. Designing new Tasks is how the
   factory grows.

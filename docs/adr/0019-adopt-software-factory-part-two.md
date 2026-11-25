@@ -139,7 +139,11 @@ surprising parts:
   indistinguishable from a standalone Ticket, so a Spec awaiting
   decomposition carries the `spec` label (the `wayfinder:map` precedent).
   `agent:implement` on a `spec`-marked issue runs to-tickets; once tickets
-  exist, sub-issues are the shape and the marker becomes redundant.
+  exist, sub-issues are the shape and the marker becomes redundant. The
+  title is the safety net: a ticketless issue titled `Spec: …` routes to
+  to-tickets even when the marker was forgotten (case-insensitive; the
+  marker stays canonical) — added after a real mis-route implemented a
+  whole Spec as a standalone Ticket.
 - **Branch conventions**: notes `agent/spec-<n>-notes`, integration
   `agent/spec-<n>-integration`, tickets unchanged (`agent/issue-<n>-<slug>`).
 - **Merger triggers**: a push to any `agent/issue-*` branch is the pulse

@@ -64,8 +64,12 @@ const remoteBranches = (): string[] =>
     .filter((name) => name.length > 0);
 
 const fetchTickets = (): WaveTicket[] => {
+  // gh() returns raw JSON stdout; parseNativeIssues eats parsed data.
   const subs = parseNativeIssues(
-    gh(["api", `repos/${GH_REPO}/issues/${SPEC_NUMBER}/sub_issues`]),
+    JSON.parse(gh([
+      "api",
+      `repos/${GH_REPO}/issues/${SPEC_NUMBER}/sub_issues`,
+    ])),
   );
   const branches = remoteBranches();
   return subs.map((sub) => {
