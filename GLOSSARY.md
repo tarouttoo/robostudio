@@ -91,14 +91,29 @@ here.
   headless as SVG in the export layer (ADR `0013`); path charts are
   equal-aspect (ADR `0007`); the app shows every chart of the last
   generation in the «Графики» view.
+- **Preview Scene (Сцена предпросмотра)** — the headless scene document
+  in millimetres that Generation assembles by pure functions from the
+  Trajectory, its Motion Plan, and the Robot Model: per-Segment
+  polylines, the sampled plan moments with the robot's chain skeleton
+  and travelled extents, the PTP TCP trace runs, the Home Point, the
+  scene bounds. Both the Motion Preview GIF and the playback dialog
+  render it (ADR `0023`).
 - **Motion Preview (Предпросмотр движения)** — the animated GIF the
-  pipeline renders from the last successful Generation's Motion Plan:
-  isometric frames (the charts' projection, ADR 0013) showing the
-  robot's base and links moving along the Trajectory, the travelled
-  part highlighted, the Home Point, and under PTP the actual TCP trace
-  from per-frame forward kinematics. At most 300 frames, paced over
-  the plan's real duration; written as `robot_motion.gif` next to the
-  CSVs (ADR 0018).
+  pipeline renders from the last successful Generation's Preview Scene
+  through the fixed isometric camera (the charts' projection, ADR
+  `0013`): 800×600 frames with background panes and grid, the
+  Trajectory colored along a fixed time gradient, anti-aliased strokes,
+  the robot's base and links moving along the Trajectory, the travelled
+  part highlighted over the gradient, the Home Point, and under PTP the
+  actual TCP trace. At most 300 frames, paced over the plan's real
+  duration; written as `robot_motion.gif` next to the CSVs. The
+  playback dialog renders the same Preview Scene through the Orbit
+  Camera instead of painting the GIF's pixels (ADR `0023`; ADR `0018`
+  for what still stands).
+- **Orbit Camera (Орбитальная камера)** — the hand-rolled interactive
+  camera of the Motion Preview playback dialog: drag rotates
+  (yaw/pitch), the wheel zooms, «Вписать»/double-click resets to the
+  default isometric fit of the whole scene (ADR `0023`).
 - **Robot CSV** — the Exporter output the real robot consumes:
   `t,q1,q2,q3`, milliseconds and radians, 20 ms row step. Format is a
   contract pinned by tests (ADR `0006`).
