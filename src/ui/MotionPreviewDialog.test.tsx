@@ -1,33 +1,55 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 
-import {
-  MOTION_PREVIEW_COLORS,
-  MOTION_PREVIEW_HEIGHT,
-  MOTION_PREVIEW_WIDTH,
-  type MotionPreviewFrame,
-} from "../export";
+import type { PreviewScene } from "../export";
 import { MotionPreviewDialog } from "./MotionPreviewDialog";
 
 /**
- * Two crafted frames of the shared renderer (the dialog's input is
- * frame data, so the tests feed frame data): the first sample and one
- * hundred milliseconds in.
+ * A crafted scene (the dialog's input is scene data, so the tests feed
+ * scene data): two sampled moments — the first sample and one hundred
+ * milliseconds in — each with a three-point robot chain, over a small
+ * millimetre bounding box. The painting itself is client-side canvas
+ * work; this seam pins what the modal renders from the scene.
  */
-const FRAMES: readonly MotionPreviewFrame[] = [
-  { tMs: 0, primitives: [] },
-  {
-    tMs: 100,
-    primitives: [{ kind: "dot", points: [[10, 10]], colorIndex: MOTION_PREVIEW_COLORS.tcp, width: 2 }],
+const SCENE: PreviewScene = {
+  segments: [],
+  moments: [
+    {
+      tMs: 0,
+      chainMm: [
+        [0, 0, 0],
+        [40, 0, 60],
+        [80, 0, 0],
+      ],
+      tcpMm: [80, 0, 0],
+      travelled: [],
+    },
+    {
+      tMs: 100,
+      chainMm: [
+        [0, 0, 0],
+        [40, 0, 60],
+        [120, 0, 0],
+      ],
+      tcpMm: [120, 0, 0],
+      travelled: [],
+    },
+  ],
+  traceRuns: [],
+  travelledSegments: [],
+  homeMm: [0, 0, 0],
+  boundsMm: {
+    min: [0, 0, 0],
+    max: [120, 0, 60],
   },
-];
+};
 
 /** The plan's real duration, in milliseconds. */
 const DURATION_MS = 120;
 
 function dialogHtml(): string {
   return renderToString(
-    <MotionPreviewDialog frames={FRAMES} durationMs={DURATION_MS} onClose={() => {}} />,
+    <MotionPreviewDialog scene={SCENE} durationMs={DURATION_MS} onClose={() => {}} />,
   ).replace(/<!-- -->/g, "");
 }
 
@@ -42,13 +64,14 @@ describe("motion preview dialog", () => {
     expect(html).toContain("Закрыть");
   });
 
-  it("shows the shared renderer's canvas at the GIF's frame size", () => {
-    // The same 480×360 frames the exported GIF encodes, scaled up for
-    // viewing (the canvas paints client-side; the element declares the
-    // renderer's exact pixel size).
-    expect(dialogHtml()).toContain(
-      `<canvas width="${MOTION_PREVIEW_WIDTH}" height="${MOTION_PREVIEW_HEIGHT}"`,
-    );
+  it("offers the viewport canvas the Orbit Camera renders through", () => {
+    // The canvas is the camera's viewport (CSS-pixel sized, painted
+    // client-side); the element declares the viewport's pixel size.
+    expect(dialogHtml()).toMatch(/<canvas [^>]*width="720"[^>]*height="540"/);
+  });
+
+  it("offers «Вписать» — the reset to the default isometric fit of the whole scene", () => {
+    expect(dialogHtml()).toContain("Вписать");
   });
 
   it("offers a time scrub across the Motion Plan's real duration", () => {

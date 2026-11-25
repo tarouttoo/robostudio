@@ -14,13 +14,14 @@
  * headless seam as the pipeline (`renderCharts`, ADR 0013), and the
  * outcome carries them: the «Графики» view shows exactly the documents
  * of the last successful Generation, as data — no view-side
- * re-derivation from plan + model. The Motion Preview frames ride on
- * the outcome the same way (ADR 0018): the playback dialog plays
- * exactly the frames the GIF exporter encodes. The pipeline, the chart
- * renderer, and the preview renderer are the seams: this module only
- * turns editor state into a Trajectory, runs it, and hands over the
- * complete outcome — no plotting, rasterizing, or export logic lives
- * here.
+ * re-derivation from plan + model. The Motion Preview's Preview Scene
+ * rides on the outcome the same way (ADR 0023), carried out of the
+ * pipeline itself: the playback dialog renders the same scene document
+ * the GIF exporter renders, so what it plays is what the GIF shows.
+ * The pipeline, the chart renderer, and the preview scene builder are
+ * the seams: this module only turns editor state into a Trajectory,
+ * runs it, and hands over the complete outcome — no plotting,
+ * projecting, or export logic lives here.
  *
  * The module also owns the Generation policy around an attempt: the
  * one export-eligibility predicate (`exportEligibility`) the export
@@ -33,12 +34,11 @@ import { trajectory, type Trajectory } from "../core";
 import {
   PipelineError,
   renderCharts,
-  renderMotionPreviewFrames,
   runPipeline,
-  type MotionPreviewFrame,
   type PipelineResult,
   type PipelineStage,
   type RenderedChart,
+  type PreviewScene,
 } from "../export";
 import { createSplinePlanner } from "../motion";
 import type { RobotModel } from "../kinematics/robot-model";
@@ -61,12 +61,13 @@ export type GenerationOutcome =
        */
       readonly charts: readonly RenderedChart[];
       /**
-       * The Motion Preview frames of this Generation, rendered at
-       * Generation time by the shared preview renderer (ADR 0018) —
-       * the same frames the exported GIF encodes. The playback dialog
-       * draws exactly these, so what it plays is what the GIF shows.
+       * The Preview Scene of this Generation (Сцена предпросмотра),
+       * assembled once by the pipeline from the run's Trajectory,
+       * Motion Plan, and Robot Model — the same document the exported
+       * GIF renders. The playback dialog draws it through its own
+       * Orbit Camera, so what it plays is the scene the GIF shows.
        */
-      readonly previewFrames: readonly MotionPreviewFrame[];
+      readonly previewScene: PreviewScene;
     }
   | {
       /** A validation stage failed and stopped the pipeline. */
@@ -124,7 +125,7 @@ export function createGenerationSession(model: RobotModel): GenerationSession {
           trajectory: traj,
           result,
           charts: renderCharts(result.plan, model),
-          previewFrames: renderMotionPreviewFrames({ trajectory: traj, plan: result.plan, model }),
+          previewScene: result.previewScene,
         };
       } catch (error) {
         if (error instanceof PipelineError) return { kind: "failed", error };

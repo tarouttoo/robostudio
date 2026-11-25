@@ -190,6 +190,8 @@ describe("convert.ts", () => {
       env: {
         EVENT_ACTION: "labeled",
         ISSUE_NUMBER: "12",
+        // pinned empty so a host AGENT_PAT cannot leak through ...process.env
+        AGENT_PAT: "",
         STUB_BLOCKED_BY: "[]",
       },
       issues: { 12: { state: "open", labels: ["ready-for-agent"] } },

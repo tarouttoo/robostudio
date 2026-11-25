@@ -75,11 +75,11 @@ const generationSession = createGenerationSession(MIKO_MINI);
  * the outcome carries, rendered at Generation time by the headless
  * renderer (ADR 0013, `ChartsView.tsx`). «Предпросмотр движения…»
  * opens the playback dialog (`MotionPreviewDialog.tsx`) over the same
- * outcome's preview frames — the shared renderer's documents (ADR
- * 0018), the exact frames the exported GIF encodes. Regeneration
- * replaces those charts and frames with the new outcome's documents; a
- * failed or blocked run carries neither and returns to «Чертёж». UI
- * text is Russian per GLOSSARY.md.
+ * outcome's Preview Scene (ADR 0023) — the scene document the exported
+ * GIF also renders; the dialog explores it through its own Orbit
+ * Camera. Regeneration replaces those charts and scene with the new
+ * outcome's documents; a failed or blocked run carries neither and
+ * returns to «Чертёж». UI text is Russian per GLOSSARY.md.
  */
 export function App(props: { readonly initialState?: EditorState } = {}): JSX.Element {
   const [state, dispatch] = useReducer(editorReducer, props.initialState ?? initialEditorState);
@@ -96,8 +96,8 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
   const [previewOpen, setPreviewOpen] = useState(false);
   /** The charts of the last successful generation, carried on its outcome (ADR 0013). */
   const charts = generation !== null && generation.kind === "ok" ? generation.charts : null;
-  /** The Motion Preview frames of the last successful generation, carried on its outcome (ADR 0018). */
-  const previewFrames = generation !== null && generation.kind === "ok" ? generation.previewFrames : null;
+  /** The Preview Scene of the last successful generation, carried on its outcome (ADR 0023). */
+  const previewScene = generation !== null && generation.kind === "ok" ? generation.previewScene : null;
   /** The Generation module's one export-policy answer: the export button's
    * disabled state, its stale notice, and the export guard all consume it. */
   const eligibility = exportEligibility(generation, state);
@@ -418,8 +418,8 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
               <button
                 type="button"
                 onClick={() => setPreviewOpen(true)}
-                disabled={previewFrames === null}
-                title={previewFrames === null ? "Предпросмотр появится после успешной генерации" : undefined}
+                disabled={previewScene === null}
+                title={previewScene === null ? "Предпросмотр появится после успешной генерации" : undefined}
               >
                 Предпросмотр движения…
               </button>
@@ -611,9 +611,9 @@ export function App(props: { readonly initialState?: EditorState } = {}): JSX.El
           )}
         </div>
       </div>
-      {previewOpen && previewFrames !== null && generation !== null && generation.kind === "ok" && (
+      {previewOpen && previewScene !== null && generation !== null && generation.kind === "ok" && (
         <MotionPreviewDialog
-          frames={previewFrames}
+          scene={previewScene}
           durationMs={generation.result.plan.durationMs}
           onClose={() => setPreviewOpen(false)}
         />
